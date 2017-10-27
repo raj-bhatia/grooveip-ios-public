@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.XIB" version="3.0" toolsVersion="13196" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" colorMatched="YES">
+    <device id="retina4_7" orientation="landscape">
+        <adaptation id="fullscreen"/>
+    </device>
+    <dependencies>
+        <deployment identifier="iOS"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="13174"/>
+        <capability name="Constraints to layout margins" minToolsVersion="6.0"/>
+        <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
+    </dependencies>
+    <objects>
+        <placeholder placeholderIdentifier="IBFilesOwner" id="-1" userLabel="File's Owner"/>
+        <placeholder placeholderIdentifier="IBFirstResponder" id="-2" customClass="UIResponder"/>
+        <view contentMode="scaleToFill" id="iN0-l3-epB">
+            <rect key="frame" x="0.0" y="0.0" width="375" height="667"/>
+            <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+            <subviews>
+                <imageView clearsContextBeforeDrawing="NO" userInteractionEnabled="NO" alpha="0.0" contentMode="scaleToFill" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="color_C.png" translatesAutoresizingMaskIntoConstraints="NO" id="xtr-QP-6We" userLabel="backgroundColor">
+                    <rect key="frame" x="0.0" y="0.0" width="375" height="667"/>
+                    <color key="backgroundColor" white="0.0" alpha="1" colorSpace="calibratedWhite"/>
+                </imageView>
+                <view contentMode="scaleAspectFit" translatesAutoresizingMaskIntoConstraints="NO" id="4JK-Mw-ZzG">
+                    <rect key="frame" x="15" y="41" width="344" height="498"/>
+                    <subviews>
+                        <imageView opaque="NO" clipsSubviews="YES" clearsContextBeforeDrawing="NO" multipleTouchEnabled="YES" contentMode="scaleAspectFit" misplaced="YES" image="LauncherIcon_default.png" translatesAutoresizingMaskIntoConstraints="NO" id="pz0-nR-x0f" userLabel="logoImage">
+                            <rect key="frame" x="0.0" y="13" width="344" height="120"/>
+                        </imageView>
+                        <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" misplaced="YES" text="GrooVe IP" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" minimumScaleFactor="0.75" translatesAutoresizingMaskIntoConstraints="NO" id="u44-hJ-SgI" userLabel="nameLabel">
+                            <rect key="frame" x="1" y="182" width="342" height="87"/>
+                            <constraints>
+                                <constraint firstAttribute="height" constant="87" id="4Jj-6Y-S0E"/>
+                            </constraints>
+                            <fontDescription key="fontDescription" type="boldSystem" pointSize="48"/>
+                            <color key="textColor" red="1" green="1" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                            <nil key="highlightedColor"/>
+                        </label>
+                        <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" misplaced="YES" text="by" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" minimumScaleFactor="0.75" translatesAutoresizingMaskIntoConstraints="NO" id="u44-hJ-SgJ" userLabel="nameLabel">
+                            <rect key="frame" x="1" y="276" width="342" height="87"/>
+                            <constraints>
+                                <constraint firstAttribute="height" constant="87" id="Poe-Wj-XqH"/>
+                            </constraints>
+                            <fontDescription key="fontDescription" type="boldSystem" pointSize="24"/>
+                            <color key="textColor" white="1" alpha="1" colorSpace="calibratedWhite"/>
+                            <nil key="highlightedColor"/>
+                        </label>
+                        <imageView opaque="NO" clipsSubviews="YES" multipleTouchEnabled="YES" contentMode="center" misplaced="YES" image="SNRBLabs_default.png" translatesAutoresizingMaskIntoConstraints="NO" id="vPM-1f-Vad">
+                            <rect key="frame" x="-18" y="380" width="381" height="93"/>
+                            <constraints>
+                                <constraint firstAttribute="height" constant="93" id="I3b-Px-s0i"/>
+                            </constraints>
+                        </imageView>
+                    </subviews>
+                    <constraints>
+                        <constraint firstItem="pz0-nR-x0f" firstAttribute="leading" secondItem="4JK-Mw-ZzG" secondAttribute="leading" id="0au-nF-a8b"/>
+                        <constraint firstItem="vPM-1f-Vad" firstAttribute="centerX" secondItem="4JK-Mw-ZzG" secondAttribute="centerX" id="4gC-M8-sMI"/>
+                        <constraint firstItem="u44-hJ-SgI" firstAttribute="top" secondItem="pz0-nR-x0f" secondAttribute="bottom" constant="34" id="6ce-kP-AoV"/>
+                        <constraint firstItem="u44-hJ-SgI" firstAttribute="leading" secondItem="4JK-Mw-ZzG" secondAttribute="leading" constant="1" id="DlG-Eg-LBd"/>
+                        <constraint firstItem="u44-hJ-SgI" firstAttribute="trailing" secondItem="u44-hJ-SgJ" secondAttribute="trailing" id="GB7-Hg-EYj"/>
+                        <constraint firstItem="u44-hJ-SgJ" firstAttribute="centerX" secondItem="vPM-1f-Vad" secondAttribute="centerX" id="K07-rx-lcl"/>
+                        <constraint firstItem="u44-hJ-SgJ" firstAttribute="top" secondItem="u44-hJ-SgI" secondAttribute="bottom" constant="3" id="Njq-OF-5WY"/>
+                        <constraint firstAttribute="bottom" secondItem="vPM-1f-Vad" secondAttribute="bottom" constant="24" id="S3M-Tt-ySw"/>
+                        <constraint firstItem="vPM-1f-Vad" firstAttribute="top" secondItem="u44-hJ-SgJ" secondAttribute="bottom" constant="14" id="Uwq-S3-bFM"/>
+                        <constraint firstItem="u44-hJ-SgI" firstAttribute="leading" secondItem="u44-hJ-SgJ" secondAttribute="leading" id="fHq-3X-x1L"/>
+                        <constraint firstItem="pz0-nR-x0f" firstAttribute="centerX" secondItem="u44-hJ-SgI" secondAttribute="centerX" id="fcP-gh-wwa"/>
+                        <constraint firstItem="pz0-nR-x0f" firstAttribute="top" secondItem="4JK-Mw-ZzG" secondAttribute="top" constant="13" id="lpR-YM-SvL"/>
+                    </constraints>
+                </view>
+            </subviews>
+            <color key="backgroundColor" red="0.0" green="0.0" blue="0.0" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+            <constraints>
+                <constraint firstItem="xtr-QP-6We" firstAttribute="centerX" secondItem="4JK-Mw-ZzG" secondAttribute="centerX" id="BjW-8G-Fqj"/>
+                <constraint firstAttribute="bottom" secondItem="4JK-Mw-ZzG" secondAttribute="bottom" constant="128" id="BuH-pe-e1o"/>
+                <constraint firstItem="4JK-Mw-ZzG" firstAttribute="trailing" secondItem="iN0-l3-epB" secondAttribute="trailingMargin" id="C5z-xl-iDK"/>
+                <constraint firstItem="xtr-QP-6We" firstAttribute="leading" secondItem="iN0-l3-epB" secondAttribute="leading" id="Kat-MX-6a2"/>
+                <constraint firstItem="4JK-Mw-ZzG" firstAttribute="top" secondItem="iN0-l3-epB" secondAttribute="top" constant="41" id="QfK-5o-Z9s"/>
+                <constraint firstAttribute="trailing" secondItem="xtr-QP-6We" secondAttribute="trailing" id="WpY-I4-0yL"/>
+                <constraint firstItem="xtr-QP-6We" firstAttribute="top" secondItem="iN0-l3-epB" secondAttribute="top" id="mm2-va-hRI"/>
+                <constraint firstAttribute="bottom" secondItem="xtr-QP-6We" secondAttribute="bottom" id="v8z-oq-RNg"/>
+            </constraints>
+            <nil key="simulatedStatusBarMetrics"/>
+            <freeformSimulatedSizeMetrics key="simulatedDestinationMetrics"/>
+            <point key="canvasLocation" x="238.5" y="1005.5"/>
+        </view>
+    </objects>
+    <resources>
+        <image name="LauncherIcon_default.png" width="76" height="76"/>
+        <image name="SNRBLabs_default.png" width="389" height="93"/>
+        <image name="color_C.png" width="2" height="2"/>
+    </resources>
+</document>

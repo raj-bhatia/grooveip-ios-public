@@ -1,18 +1,26 @@
-[![Build Status](https://travis-ci.org/BelledonneCommunications/linphone-iphone.svg?branch=master)](https://travis-ci.org/BelledonneCommunications/linphone-iphone)
-
-Linphone is a free VoIP and video softphone based on the SIP protocol.
-
-![Dialer screenshot](http://www.linphone.org/img/slideshow-phone.png)
-
 # GrooVe IP - iOS
 
 GrooVe IP - iOS is based on Linphone open source software. The Linphone software has been modified to work with the SNRB Labs backend servers to provide calling and texting services.
 
 The build procedure is almost identical to that of Linphone - iOS. Please note the following:
 - The build does not work with the latest version of Xcode (Xcode 9). Use Xcode 8.
-- When using the "prepare.py" command, use it with the option to disable video calling (which is not supported by GrooVe IP - iOS) in the following manner:
-        ./prepare.py -DENABLE_VIDEO=OFF
 - There are two files in the Classes/SNRBLabs/Private folder--Secret.h and Secret.m. These have the sample code to communicate with SNRB Labs like servers providing calling and texting capabilities. These files need to be modified to match with the interface requirements of whatever service provider you plan to use for calling/texting.
+
+Follow these steps to build and exercise the software:
+- Download the source code to a Mac in a separate folder
+- In the folder where you downloaded, in a terminal window, execute "./prepare.py -c" command to clean
+- In the terminal window, execute "./prepare.py -DENABLE_VIDEO=OFF" commad to install dependencies. GrooVe IP - iOS does not support video calling so it is necessary to turn that feature off.
+- In the terminal window, execute "make" to build libraries
+- Start Xcode
+- Build and test
+
+The rest of this README file is the same as what Linphone - iOS provides. Please refer to it for more details.
+
+[![Build Status](https://travis-ci.org/BelledonneCommunications/linphone-iphone.svg?branch=master)](https://travis-ci.org/BelledonneCommunications/linphone-iphone)
+
+Linphone is a free VoIP and video softphone based on the SIP protocol.
+
+![Dialer screenshot](http://www.linphone.org/img/slideshow-phone.png)
 
 # How can I contribute?
 

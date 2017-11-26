@@ -19,6 +19,7 @@
 	return [self initWithPerson:NULL andFriend:afriend];
 }
 
+#if 0	// Changed Linphone code - Simplify method since we will not have any Linphone contacts
 - (instancetype)initWithPerson:(ABRecordRef)aperson andFriend:(LinphoneFriend *)afriend {
 	self = [super init];
 	_person = aperson;
@@ -81,6 +82,24 @@
 		 self.phoneNumbers.count, self.sipAddresses.count, self.emails.count);
 	return self;
 }
+#else
+- (instancetype)initWithPerson:(ABRecordRef)aperson andFriend:(LinphoneFriend *)afriend {
+	self = [super init];
+	_person = aperson;
+	_friend = NULL;
+	_added = FALSE;
+	if (_person) {
+		[self loadProperties];
+	} else {
+		LOGE(@"Contact cannot be initialized");
+		return nil;
+	}
+	
+	LOGI(@"Contact %@ %@ initialized with %d phones, %d sip, %d emails", self.firstName ?: @"", self.lastName ?: @"",
+		 self.phoneNumbers.count, self.sipAddresses.count, self.emails.count);
+	return self;
+}
+#endif
 
 - (void)dealloc {
 	if (_person != nil && ABRecordGetRecordID(_person) == kABRecordInvalidID) {

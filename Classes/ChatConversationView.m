@@ -23,6 +23,8 @@
 #import "FileTransferDelegate.h"
 #import "UIChatBubbleTextCell.h"
 #import "SmsManager.h"
+#import "PutMedia.h"
+#import "MmsManager.h"
 
 @implementation ChatConversationView
 
@@ -235,17 +237,20 @@ static UICompositeViewDescription *compositeDescription = nil;
 	NSString *errorMessage;
 	switch (errorCode) {
 		case 402:
-			errorMessage = @"You have no money remaining in your account. Please add some money to continue sending SMS.";
+			errorMessage = @"You have no money remaining in your account. Please add some money to continue sending SMS/MMS.";
 			break;
 		case 403:
-			errorMessage = @"The number you are trying to send SMS to seems to be invalid.";
+			errorMessage = @"The number you are trying to send message to seems to be invalid.";
+			break;
+		case 413:	// For MMS only
+			errorMessage = @"The image size is too large.";
 			break;
 		default:
 			errorMessage = [NSString stringWithFormat:@"Unknown error. Please try again later. If the issue continues, please contact us. (Code %i.)", errorCode];
 			break;
 	}
 	UIAlertController *errView = [UIAlertController
-								  alertControllerWithTitle:NSLocalizedString(@"SMS send error", nil)
+								  alertControllerWithTitle:NSLocalizedString(@"SMS/MMS send error", nil)
 								  message:NSLocalizedString(errorMessage, nil)
 								  preferredStyle:UIAlertControllerStyleAlert];
 	
@@ -294,7 +299,7 @@ static UICompositeViewDescription *compositeDescription = nil;
 		const char *username = linphone_address_get_username(addr);
 		NSString *to = [NSString stringWithUTF8String:username];
 		const char *uid = linphone_proxy_config_get_snrblabs_userid(config);
-		const char *tkn = linphone_proxy_config_get_snrblabs_token(config);		
+		const char *tkn = linphone_proxy_config_get_snrblabs_token(config);
 		const LinphoneAddress *myAddress = linphone_proxy_config_get_identity_address(config);
 		const char *frm = linphone_address_get_display_name(myAddress);
 		
@@ -359,11 +364,13 @@ static UICompositeViewDescription *compositeDescription = nil;
 						   }
 						 }];
 	} else {
+		// Photo from gallery
 		[self startImageUpload:image url:url];
 	}
 }
 
 - (void)chooseImageQuality:(UIImage *)image url:(NSURL *)url {
+#if 0	// Changed Linphone code - Don't present image quality choice to the user
 	DTActionSheet *sheet = [[DTActionSheet alloc] initWithTitle:NSLocalizedString(@"Choose the image size", nil)];
 	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
 	  for (NSString *key in [imageQualities allKeys]) {
@@ -382,6 +389,20 @@ static UICompositeViewDescription *compositeDescription = nil;
 		[sheet showInView:PhoneMainView.instance.view];
 	  });
 	});
+#else
+	DTActionSheet *sheet = [[DTActionSheet alloc] initWithTitle:NSLocalizedString(@"Confirm selection and send", nil)];
+	dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+		NSString *text = @"Send image";
+		[sheet addButtonWithTitle:text
+							block:^() {
+								[self saveAndSend:image url:url];
+							}];
+		[sheet addCancelButtonWithTitle:NSLocalizedString(@"Cancel", nil) block:nil];
+		dispatch_async(dispatch_get_main_queue(), ^{
+			[sheet showInView:PhoneMainView.instance.view];
+		});
+	});
+#endif
 }
 
 - (void)setComposingVisible:(BOOL)visible withDelay:(CGFloat)delay {
@@ -413,6 +434,70 @@ static UICompositeViewDescription *compositeDescription = nil;
 		  _composeIndicatorView.hidden = !visible;
 		}];
 }
+
+#if 1	// Changed Linphone code - Method for sending image to server
+- (void) sendImageToServer:(UIImage *) image message : (LinphoneChatMessage *) message compression : (int) cpr {
+	const LinphoneAddress *addr = linphone_chat_room_get_peer_address(_chatRoom);
+	if (addr != NULL) {
+		NSMutableData *data = [NSMutableData dataWithData:UIImageJPEGRepresentation(image, 0.1 * cpr)];
+		LinphoneProxyConfig *config = linphone_core_get_default_proxy_config(LC);
+		const char *username = linphone_address_get_username(addr);
+		NSString *to = [NSString stringWithUTF8String:username];
+		const char *uid = linphone_proxy_config_get_snrblabs_userid(config);
+		const char *tkn = linphone_proxy_config_get_snrblabs_token(config);
+		if (to && uid && tkn && data) {
+			NSString *userId = [[NSString alloc] initWithUTF8String:uid];
+			NSString *token = [[NSString alloc] initWithUTF8String:tkn];
+			long interval = ([NSDate timeIntervalSinceReferenceDate] * 1000);	// Milliseconds since 1/1/2001
+			const char *name = [[NSString stringWithFormat:@"nn%@-%ld.jpg", userId, interval] UTF8String];
+			NSString *fileName = [[NSString alloc] initWithUTF8String:name];
+			NSLog(@"sendImageToServer: UserId %@ Token %@ To %@ FileName %@", userId, token, to, fileName);
+			
+			PutMedia *putMedia = [PutMedia instance];
+			[putMedia putMediaWithUserId:userId token:token to:to fileName:fileName data:data
+						   completion:^(GenericResponse *genericResponse, int *status) {
+							   if (0 != *status) {
+								   dispatch_async(dispatch_get_main_queue(), ^{
+									   [self displaySmsManagerError : *status];
+									   linphone_chat_message_update_state(message, LinphoneChatMessageStateNotDelivered);
+								   });
+								   NSLog(@"PutMedia error: %d", *status);
+								   return;
+							   }
+							   
+							   // Received 200 OK
+							   NSLog(@"PutMedia: Received 200 OK");
+							   
+							   MmsManager *mmsManager = [MmsManager instance];
+							   const LinphoneAddress *myAddress = linphone_proxy_config_get_identity_address(config);
+							   const char *frm = linphone_address_get_display_name(myAddress);
+							   NSString *from = [[NSString alloc] initWithUTF8String:frm];
+							   NSString *text = nil;
+							   [mmsManager mmsWithUserId:userId token:token to:to from:from text:text fileName:fileName
+												 completion:^(SmsResponse *smsResponse, int *status) {
+													 if (0 != *status) {
+														 dispatch_async(dispatch_get_main_queue(), ^{
+															 [self displaySmsManagerError : *status];
+															 linphone_chat_message_update_state(message, LinphoneChatMessageStateNotDelivered);
+														 });
+														 NSLog(@"MMS Send error: %d", *status);
+														 return;
+													 }
+													 
+													 // Received 200 OK
+													 dispatch_async(dispatch_get_main_queue(), ^{
+														 linphone_chat_message_update_state(message, LinphoneChatMessageStateDelivered);
+													 });
+													 NSLog(@"MMS Send: Received 200 OK");
+												 }];
+						   }];
+		} else {
+			linphone_chat_message_update_state(message, LinphoneChatMessageStateNotDelivered);
+			NSLog(@"Error - PutMedia/MmsManager not called: UserId %s Token %s To %@", uid, tkn, to);
+		}
+	}
+}
+#endif
 
 #pragma mark - Event Functions
 
@@ -647,13 +732,41 @@ static UICompositeViewDescription *compositeDescription = nil;
 
 #pragma mark ChatRoomDelegate
 
+#if 0	// Changed Linphone code - If image size is too large, detect early and abandon transfer
 - (BOOL)startImageUpload:(UIImage *)image url:(NSURL *)url {
 	FileTransferDelegate *fileTransfer = [[FileTransferDelegate alloc] init];
 	[fileTransfer upload:image withURL:url forChatRoom:_chatRoom];
 	[_tableController addChatEntry:linphone_chat_message_ref(fileTransfer.message)];
 	[_tableController scrollToBottom:true];
+	[self sendImageToServer:image message:fileTransfer.message];
 	return TRUE;
 }
+#else
+- (BOOL)startImageUpload:(UIImage *)image url:(NSURL *)url {
+	FileTransferDelegate *fileTransfer = [[FileTransferDelegate alloc] init];
+	int compression = [fileTransfer upload:image withURL:url forChatRoom:_chatRoom];
+	if (0 > compression) {	// Image is too large and cannot be sent
+		NSString *errorMessage = @"The selected image, even after compression, is too large and cannot be sent!";
+		UIAlertController *errView = [UIAlertController
+									  alertControllerWithTitle:NSLocalizedString(@"Image send error", nil)
+									  message:NSLocalizedString(errorMessage, nil)
+									  preferredStyle:UIAlertControllerStyleAlert];
+		
+		UIAlertAction *defaultAction = [UIAlertAction actionWithTitle:NSLocalizedString(@"OK", nil)
+																style:UIAlertActionStyleDefault
+															  handler:^(UIAlertAction *action){
+															  }];
+		
+		[errView addAction:defaultAction];
+		[self presentViewController:errView animated:YES completion:nil];
+		return false;
+	}
+	[_tableController addChatEntry:linphone_chat_message_ref(fileTransfer.message)];
+	[_tableController scrollToBottom:true];
+	[self sendImageToServer:image message:fileTransfer.message compression:compression];
+	return TRUE;
+}
+#endif
 
 - (void)resendChat:(NSString *)message withExternalUrl:(NSString *)url {
 	[self sendMessage:message withExterlBodyUrl:[NSURL URLWithString:url] withInternalURL:nil];

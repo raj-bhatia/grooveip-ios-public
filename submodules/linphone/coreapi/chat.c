@@ -387,6 +387,7 @@ void _linphone_chat_room_send_message(LinphoneChatRoom *cr, LinphoneChatMessage 
 
 	/* Check if we shall upload a file to a server */
 	if (msg->file_transfer_information != NULL && msg->content_type == NULL) {
+#if 0	// Changed Linphone code - Don't do the actual file transfer
 		/* open a transaction with the server and send an empty request(RCS5.1 section 3.5.4.8.3.1) */
 		if (linphone_chat_room_upload_file(msg) == 0) {
 			/* Add to transient list only if message is going out */
@@ -397,6 +398,12 @@ void _linphone_chat_room_send_message(LinphoneChatRoom *cr, LinphoneChatMessage 
 			linphone_chat_message_unref(msg);
 			return;
 		}
+#else
+		/* Add to transient list */
+		linphone_chat_room_add_transient_message(cr, msg);
+		/* Store the message so that even if the upload is stopped, it can be done again */
+		msg->storage_id = linphone_chat_message_store(msg);
+#endif
 	} else {
 		SalOp *op = msg->op;
 		LinphoneCall *call=NULL;
@@ -549,7 +556,11 @@ void linphone_chat_room_send_message(LinphoneChatRoom *cr, const char *msg) {
 }
 
 static bool_t is_file_transfer(const char *content_type) {
+#if 0	// Changed Linphone code - Different content type for MMS
 	return (strcmp("application/vnd.gsma.rcs-ft-http+xml", content_type) == 0);
+#else
+	return (strcmp("application/octet-stream", content_type) == 0);
+#endif
 }
 
 static bool_t is_im_iscomposing(const char* content_type) {
@@ -1734,10 +1745,11 @@ LinphoneCall *linphone_chat_room_get_call(const LinphoneChatRoom *room) {
 	return room->call;
 }
 
-void snrblabs_received_message (LinphoneCore *lc, LinphoneChatRoom *cr, const char *to, const char *text, const char *messageId) {
+void snrblabs_received_sms (LinphoneCore *lc, LinphoneChatRoom *cr, const char *to, const char *text, const char *messageId) {
 	LinphoneChatMessage *msg = NULL;
 
 	msg = linphone_chat_room_create_message(cr, text);
+	ms_message("snrblabs_received_sms: Enter (%p) - To %s, Text %s, ID %s", msg, to, text, messageId);
 	linphone_chat_message_set_content_type(msg, "text/plain");
 	linphone_chat_message_set_from(msg, linphone_chat_room_get_peer_address(cr));
 	msg->to = linphone_address_new(to);
@@ -1755,5 +1767,39 @@ void snrblabs_received_message (LinphoneCore *lc, LinphoneChatRoom *cr, const ch
 
 	msg->storage_id = linphone_chat_message_store(msg);
 
+	if (msg != NULL) linphone_chat_message_unref(msg);
+}
+
+void snrblabs_received_mms (LinphoneCore *lc, LinphoneChatRoom *cr, const char *to, const char *url, const char *messageId) {
+	LinphoneChatMessage *msg = NULL;
+
+	msg = linphone_chat_room_create_message(cr, "");
+	ms_message("snrblabs_received_mms: Enter (%p) - To %s, URL %s, ID %s", msg, to, url, messageId);
+	linphone_chat_message_set_content_type(msg, "application/octet-stream");
+	linphone_chat_message_set_from(msg, linphone_chat_room_get_peer_address(cr));
+	msg->to = linphone_address_new(to);
+	msg->time = ms_time(0);
+	msg->state = LinphoneChatMessageStateDelivered;
+	msg->dir = LinphoneChatMessageIncoming;
+	msg->message_id = ms_strdup(messageId);
+	linphone_chat_message_set_external_body_url(msg, url);
+
+	if (cr->unread_count < 0)
+		cr->unread_count = 1;
+	else
+		cr->unread_count++;
+
+	linphone_core_notify_message_received(lc, cr, msg);
+
+	msg->storage_id = linphone_chat_message_store(msg);
+}
+
+void snrblabs_received_photo (LinphoneCore *lc, LinphoneChatRoom *cr, LinphoneChatMessage *msg) {
+	ms_message("snrblabs_received_photo: Enter (%p)", msg);
+	linphone_core_notify_message_received(lc, cr, msg);
+}
+
+void snrblabs_unref_mms (LinphoneChatMessage *msg) {
+	ms_message("snrblabs_unref_mms: Enter (%p)", msg);
 	if (msg != NULL) linphone_chat_message_unref(msg);
 }

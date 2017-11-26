@@ -285,7 +285,15 @@ static void message_status(LinphoneChatMessage *msg, LinphoneChatMessageState st
 		[_imdmLabel setHidden:FALSE];
 	} else if (state == LinphoneChatMessageStateNotDelivered || state == LinphoneChatMessageStateFileTransferError) {
 		[_imdmIcon setImage:[UIImage imageNamed:@"chat_error"]];
+#if 0	// Changed Linphone code - Change wording for MMS case. MMS "resend" just sends thrumbnail, not the original image.
 		[_imdmLabel setText:NSLocalizedString(@"Resend", nil)];
+#else
+		if (linphone_chat_message_get_file_transfer_information(_message) != NULL) {
+			[_imdmLabel setText:NSLocalizedString(@"Failed", nil)];	// MMS failure
+		} else {
+			[_imdmLabel setText:NSLocalizedString(@"Resend", nil)];	// SMS failure
+		}
+#endif
 		[_imdmLabel setTextColor:[UIColor redColor]];
 		[_imdmIcon setHidden:FALSE];
 		[_imdmLabel setHidden:FALSE];

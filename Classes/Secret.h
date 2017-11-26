@@ -25,6 +25,9 @@
 #define CREATE_ARN_URL @"Your CreateArn URL"
 #define UPDATE_TOKEN_URL @"Your UpdateToken URL"
 #define PUSH_RESPONSE_URL @"Your PushResponse URL"
+#define MMS_URL @"Your Mms URL"
+#define PUT_MEDIA_URL @"Your PutMedia URL"
+#define GET_MEDIA_URL @"Your GetMedia URL"
 
 @interface Secret : NSObject
 
@@ -56,6 +59,25 @@
 							  token : (NSString *) token
 							 callId : (NSString *) callId
 						  epochTime : (long) epochTime;
+
++ (NSString *) getHash_Mms : (NSString *) userId
+					 token : (NSString *) token
+					  from : (NSString *) from
+						to : (NSString *) to
+					  text : (NSString *) text
+				  fileName : (NSString *) fileName
+				 epochTime : (long) epochTime;
+
++ (NSString *) getHash_PutMedia : (NSString *) userId
+						  token : (NSString *) token
+							 to : (NSString *) to
+					   fileName : (NSString *) fileName
+					  epochTime : (long) epochTime;
+
++ (NSString *) getHash_GetMedia : (NSString *) userId
+						  token : (NSString *) token
+					   fileName : (NSString *) fileName
+					  epochTime : (long) epochTime;
 
 @end
 

@@ -1270,7 +1270,7 @@ static void linphone_iphone_popup_password_request(LinphoneCore *lc, const char 
 	NSString *remote_uri = [NSString stringWithUTF8String:c_address];
 	ms_free(c_address);
 	int index = [(NSNumber *)[_pushDict objectForKey:callID] intValue] - 1;
-	LOGI(@"Decrementing index of long running task for call id : %@ with index : %d", callID, index);
+	LOGI(@"onMessageReceived: Decrementing index of long running task for call id : %@ with index : %d", callID, index);
 	[_pushDict setValue:[NSNumber numberWithInt:index] forKey:callID];
 	BOOL need_bg_task = FALSE;
 	for (NSString *key in [_pushDict allKeys]) {
@@ -1426,6 +1426,26 @@ static void linphone_iphone_popup_password_request(LinphoneCore *lc, const char 
 }
 
 static void linphone_iphone_message_received(LinphoneCore *lc, LinphoneChatRoom *room, LinphoneChatMessage *message) {
+#if 1	// Changed Linphone code - Download image file
+	BOOL outgoing = linphone_chat_message_is_outgoing(message);
+	NSString *type = [NSString stringWithUTF8String : linphone_chat_message_get_content_type(message)];
+	NSString *localImage = [LinphoneManager getMessageAppDataForKey:@"localimage" inMessage:message];
+
+	if (!outgoing && [type isEqualToString:@"application/octet-stream"] && !localImage) {
+		if (LinphoneChatMessageStateDelivered == linphone_chat_message_get_state(message)) {
+			linphone_chat_message_update_state(message, LinphoneChatMessageStateInProgress);
+			LOGI(@"linphone_iphone_message_received: Start image download");
+			dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0ul);
+			dispatch_async(queue, ^{
+				FileTransferDelegate *ftd = [[FileTransferDelegate alloc] init];
+				[ftd download:message];
+			});
+		} else {
+			LOGI(@"linphone_iphone_message_received: Image already being downloaded");
+		}
+		return;
+	}
+#endif
 	[(__bridge LinphoneManager *)linphone_core_get_user_data(lc) onMessageReceived:lc room:room message:message];
 }
 

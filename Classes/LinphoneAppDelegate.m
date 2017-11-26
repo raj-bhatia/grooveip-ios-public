@@ -630,7 +630,31 @@ static LinphoneRegistrationState _registrationState = LinphoneRegistrationNone;
 					LinphoneChatRoom *cr = linphone_core_get_chat_room_from_uri(LC, from.UTF8String);
 					LinphoneProxyConfig *config = linphone_core_get_default_proxy_config(LC);
 					const char *identity = linphone_proxy_config_get_identity(config);
-					snrblabs_received_message(LC, cr, identity, [text UTF8String], [messageId UTF8String]);
+					snrblabs_received_sms(LC, cr, identity, [text UTF8String], [messageId UTF8String]);
+				} else if ([eventType isEqualToString : @"mms"]) {
+					NSString *from = [alert objectForKey:@"from"];
+					NSString *text = [alert objectForKey:@"text"];
+					NSString *messageId = [alert objectForKey:@"messageId"];
+					LinphoneChatRoom *cr = linphone_core_get_chat_room_from_uri(LC, from.UTF8String);
+					LinphoneProxyConfig *config = linphone_core_get_default_proxy_config(LC);
+					const char *identity = linphone_proxy_config_get_identity(config);
+					if (0 != [text length]) {
+						snrblabs_received_sms(LC, cr, identity, [text UTF8String], [messageId UTF8String]);
+					}
+					NSArray *media = [alert objectForKey:@"media"];
+					LOGI(@"PushNotification - MMS: From %@, Text %@, MessageId %@", from, text, messageId);
+					for (int i = 0; i < [media count]; i++) {
+						NSString *url = media[i];
+						LOGI(@"PushNotification - MMS - media: i = %d, Media = %@", i, url);
+						NSArray *parts = [url componentsSeparatedByString:@"/"];
+						unsigned long size = [parts count];
+						NSString *name = parts[size - 1];
+						if (([[name pathExtension] caseInsensitiveCompare:@"txt"] != NSOrderedSame) && ([[name pathExtension] caseInsensitiveCompare:@"smil"] != NSOrderedSame)) {
+							LOGI(@"PushNotification - MMS - media name (NOT txt/smil): i = %d, Name = %@", i, name);
+							snrblabs_received_mms(LC, cr, identity, [url UTF8String], [messageId UTF8String]);
+							break;
+						}
+					}
 				}
 			}
 		}

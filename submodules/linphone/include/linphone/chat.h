@@ -647,8 +647,13 @@ LINPHONE_PUBLIC void linphone_chat_message_cbs_set_file_transfer_progress_indica
 
 LINPHONE_PUBLIC void linphone_chat_message_update_state(LinphoneChatMessage *msg, LinphoneChatMessageState new_state);
 
-LINPHONE_PUBLIC void snrblabs_received_message (LinphoneCore *lc, LinphoneChatRoom *cr, const char *to, const char *text, const char *messageId);
+LINPHONE_PUBLIC void snrblabs_received_sms (LinphoneCore *lc, LinphoneChatRoom *cr, const char *to, const char *text, const char *messageId);
 
+LINPHONE_PUBLIC void snrblabs_received_mms (LinphoneCore *lc, LinphoneChatRoom *cr, const char *to, const char *url, const char *messageId);
+
+LINPHONE_PUBLIC void snrblabs_received_photo (LinphoneCore *lc, LinphoneChatRoom *cr, LinphoneChatMessage *msg);
+
+LINPHONE_PUBLIC void snrblabs_unref_mms (LinphoneChatMessage *msg);
 /**
  * @}
  */

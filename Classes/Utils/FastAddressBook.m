@@ -185,7 +185,11 @@ static void sync_address_book(ABAddressBookRef addressBook, CFDictionaryRef info
 			}
 
 			ABAddressBookRegisterExternalChangeCallback(addressBook, sync_address_book, (__bridge void *)(weakSelf));
+#if 0	// Changed Linphone code - This takes a long time so run it in the background
 			dispatch_async(dispatch_get_main_queue(), ^(void) {
+#else
+			dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^(void) {
+#endif
 			  [weakSelf loadData];
 			});
 

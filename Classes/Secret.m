@@ -67,4 +67,32 @@
 	return @"PushResponse Hash";
 }
 
++ (NSString *) getHash_Mms : (NSString *) userId
+					 token : (NSString *) token
+					  from : (NSString *) from
+						to : (NSString *) to
+					  text : (NSString *) text
+				  fileName : (NSString *) fileName
+				 epochTime : (long) epochTime
+{
+	return @"Mms Hash";
+}
+
++ (NSString *) getHash_PutMedia : (NSString *) userId
+						  token : (NSString *) token
+							 to : (NSString *) to
+					   fileName : (NSString *) fileName
+					  epochTime : (long) epochTime
+{
+	return @"PutMedia Hash";
+}
+
++ (NSString *) getHash_GetMedia : (NSString *) userId
+						  token : (NSString *) token
+					   fileName : (NSString *) fileName
+					  epochTime : (long) epochTime
+{
+	return @"GetMedia Hash";
+}
+
 @end

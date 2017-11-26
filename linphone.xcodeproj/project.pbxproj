@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0C23F4B61FAEAC5B00F564E8 /* MmsManager.m in Sources */ = {isa = PBXBuildFile; fileRef = 0C23F4B51FAEAC5B00F564E8 /* MmsManager.m */; };
+		0C23F4B81FAEB8E000F564E8 /* PutMedia.m in Sources */ = {isa = PBXBuildFile; fileRef = 0C23F4B71FAEB8E000F564E8 /* PutMedia.m */; };
 		0C306A291F6DC6C500BC1FCC /* LauncherIcon_default.png in Resources */ = {isa = PBXBuildFile; fileRef = 0C306A281F6DC6C500BC1FCC /* LauncherIcon_default.png */; };
 		0C306A311F6DC70800BC1FCC /* LauncherIcon_default@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 0C306A301F6DC70800BC1FCC /* LauncherIcon_default@2x.png */; };
 		0C38178F1F0F46300063C55C /* SNRBLabs_default.png in Resources */ = {isa = PBXBuildFile; fileRef = 0C38178E1F0F46300063C55C /* SNRBLabs_default.png */; };
@@ -17,6 +19,8 @@
 		0CA4A72E1F40C73B0030A7EA /* LoginManager.m in Sources */ = {isa = PBXBuildFile; fileRef = 0CA4A72D1F40C73B0030A7EA /* LoginManager.m */; };
 		0CA97DE41F76C29300B728CB /* PushResponseManager.m in Sources */ = {isa = PBXBuildFile; fileRef = 0CA97DE31F76C29300B728CB /* PushResponseManager.m */; };
 		0CA97DE81F78698600B728CB /* callkit_image_grooveip.png in Resources */ = {isa = PBXBuildFile; fileRef = 0CA97DE71F78698600B728CB /* callkit_image_grooveip.png */; };
+		0CC6E2421FC07EA1004AEA09 /* GetMedia.m in Sources */ = {isa = PBXBuildFile; fileRef = 0CC6E2411FC07EA1004AEA09 /* GetMedia.m */; };
+		0CC6E2441FC088BB004AEA09 /* GetMediaResponse.m in Sources */ = {isa = PBXBuildFile; fileRef = 0CC6E2431FC088BB004AEA09 /* GetMediaResponse.m */; };
 		0CEF61B61F4F0EA700D3FB8D /* CreateArn.m in Sources */ = {isa = PBXBuildFile; fileRef = 0CEF61B51F4F0EA700D3FB8D /* CreateArn.m */; };
 		0CEF61C01F4F0FB700D3FB8D /* GenericResponse.m in Sources */ = {isa = PBXBuildFile; fileRef = 0CEF61BF1F4F0FB700D3FB8D /* GenericResponse.m */; };
 		0CEF61C21F4F225300D3FB8D /* UpdateToken.m in Sources */ = {isa = PBXBuildFile; fileRef = 0CEF61C11F4F225300D3FB8D /* UpdateToken.m */; };
@@ -917,6 +921,10 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		0C23F4AE1FAEAC3100F564E8 /* MmsManager.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MmsManager.h; sourceTree = "<group>"; };
+		0C23F4B51FAEAC5B00F564E8 /* MmsManager.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = MmsManager.m; sourceTree = "<group>"; };
+		0C23F4B71FAEB8E000F564E8 /* PutMedia.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = PutMedia.m; sourceTree = "<group>"; };
+		0C23F4B91FAEB8FA00F564E8 /* PutMedia.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PutMedia.h; sourceTree = "<group>"; };
 		0C306A281F6DC6C500BC1FCC /* LauncherIcon_default.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = LauncherIcon_default.png; sourceTree = "<group>"; };
 		0C306A301F6DC70800BC1FCC /* LauncherIcon_default@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "LauncherIcon_default@2x.png"; sourceTree = "<group>"; };
 		0C38178E1F0F46300063C55C /* SNRBLabs_default.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = SNRBLabs_default.png; sourceTree = "<group>"; };
@@ -931,6 +939,10 @@
 		0CA97DDA1F76BEC300B728CB /* PushResponseManager.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PushResponseManager.h; sourceTree = "<group>"; };
 		0CA97DE31F76C29300B728CB /* PushResponseManager.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = PushResponseManager.m; sourceTree = "<group>"; };
 		0CA97DE71F78698600B728CB /* callkit_image_grooveip.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = callkit_image_grooveip.png; sourceTree = "<group>"; };
+		0CC6E23A1FC07D2C004AEA09 /* GetMedia.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GetMedia.h; sourceTree = "<group>"; };
+		0CC6E2411FC07EA1004AEA09 /* GetMedia.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = GetMedia.m; sourceTree = "<group>"; };
+		0CC6E2431FC088BB004AEA09 /* GetMediaResponse.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = GetMediaResponse.m; sourceTree = "<group>"; };
+		0CC6E2451FC08965004AEA09 /* GetMediaResponse.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GetMediaResponse.h; sourceTree = "<group>"; };
 		0CEF61B51F4F0EA700D3FB8D /* CreateArn.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = CreateArn.m; sourceTree = "<group>"; };
 		0CEF61BD1F4F0ECE00D3FB8D /* CreateArn.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = CreateArn.h; sourceTree = "<group>"; };
 		0CEF61BE1F4F0F9900D3FB8D /* GenericResponse.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GenericResponse.h; sourceTree = "<group>"; };
@@ -2145,6 +2157,14 @@
 				0CEF61BF1F4F0FB700D3FB8D /* GenericResponse.m */,
 				0CEF61C31F4F226F00D3FB8D /* UpdateToken.h */,
 				0CA97DDA1F76BEC300B728CB /* PushResponseManager.h */,
+				0C23F4AE1FAEAC3100F564E8 /* MmsManager.h */,
+				0C23F4B51FAEAC5B00F564E8 /* MmsManager.m */,
+				0C23F4B71FAEB8E000F564E8 /* PutMedia.m */,
+				0C23F4B91FAEB8FA00F564E8 /* PutMedia.h */,
+				0CC6E23A1FC07D2C004AEA09 /* GetMedia.h */,
+				0CC6E2411FC07EA1004AEA09 /* GetMedia.m */,
+				0CC6E2431FC088BB004AEA09 /* GetMediaResponse.m */,
+				0CC6E2451FC08965004AEA09 /* GetMediaResponse.h */,
 			);
 			name = SNRBLabs;
 			sourceTree = "<group>";
@@ -3953,7 +3973,9 @@
 				63B8D6A21BCBF43100C12B09 /* UIChatCreateCell.m in Sources */,
 				636BC9971B5F921B00C754CE /* UIIconButton.m in Sources */,
 				63423C0A1C4501D000D9A050 /* Contact.m in Sources */,
+				0C23F4B81FAEB8E000F564E8 /* PutMedia.m in Sources */,
 				340751E7150F38FD00B89C47 /* UIVideoButton.m in Sources */,
+				0C23F4B61FAEAC5B00F564E8 /* MmsManager.m in Sources */,
 				34216F401547EBCD00EA9777 /* VideoZoomHandler.m in Sources */,
 				D3F83EEC1582021700336684 /* CallView.m in Sources */,
 				8C2595DD1DEDC92D007A6424 /* ProviderDelegate.m in Sources */,
@@ -3988,6 +4010,7 @@
 				570742611D5A09B8004B9C84 /* ShopView.m in Sources */,
 				63F1DF4F1BCE985F00EDED90 /* UICallConferenceCell.m in Sources */,
 				D37DC6C11594AE1800B2A5EB /* LinphoneCoreSettingsStore.m in Sources */,
+				0CC6E2421FC07EA1004AEA09 /* GetMedia.m in Sources */,
 				63CD4B4F1A5AAC8C00B84282 /* DTAlertView.m in Sources */,
 				D3EA53FD159850E80037DC6B /* LinphoneManager.m in Sources */,
 				0C64C1BD1F8C72B200E2DE26 /* Secret.m in Sources */,
@@ -4052,6 +4075,7 @@
 				22405F001601C19200B92522 /* ImageView.m in Sources */,
 				63BC49E21BA2CDFC004EC273 /* UICallPausedCell.m in Sources */,
 				D37EE162160377D7003608A6 /* DTActionSheet.m in Sources */,
+				0CC6E2441FC088BB004AEA09 /* GetMediaResponse.m in Sources */,
 				D306459E1611EC2A00BB571E /* UILoadingImageView.m in Sources */,
 				6381DA7D1C1AD5EA00DF3BBD /* UIBouncingView.m in Sources */,
 				D37E3ECD1619C27A0087659A /* CAAnimation+Blocks.m in Sources */,

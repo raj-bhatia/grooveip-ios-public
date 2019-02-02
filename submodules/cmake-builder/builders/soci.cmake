@@ -1,6 +1,6 @@
 ############################################################################
 # soci.cmake
-# Copyright (C) 2015  Belledonne Communications, Grenoble France
+# Copyright (C) 2015-2018  Belledonne Communications, Grenoble France
 #
 ############################################################################
 #
@@ -20,20 +20,26 @@
 #
 ############################################################################
 
-set(soci_filename "soci-3.2.3.tar.gz")
-set(EP_soci_URL "${CMAKE_CURRENT_SOURCE_DIR}/builders/soci/${soci_filename}")
-set(EP_soci_URL_HASH "SHA1=5e527cf5c1740198fa706fc8821af45b34867ee1")
+lcb_git_repository("git://git.linphone.org/soci.git")
+lcb_external_source_paths("externals/soci")
+if(NOT APPLE)
+	# Do not build sqlite3 on Apple systems (Mac OS X and iOS), it is provided by the system
+	lcb_dependencies("sqlite3")
+endif()
 
-set(EP_soci_BUILD_METHOD "rpm")
-set(EP_soci_SPEC_FILE "soci.spec" )
-set(EP_soci_CONFIG_H_FILE "${CMAKE_CURRENT_SOURCE_DIR}/builders/soci/${EP_soci_SPEC_FILE}" )
-set(EP_soci_RPMBUILD_OPTIONS "--without postgresql --without sqlite3 --without odbc --with mysql --without oracle --define 'soci_patch ${CMAKE_CURRENT_SOURCE_DIR}/builders/soci/soci_libdir.patch'")
+lcb_cmake_options(
+	"-DSOCI_TESTS=NO"
+	"-DSOCI_EMPTY=NO"
 
-#create source dir and copy the tar.gz inside
-set(EP_soci_PATCH_COMMAND "${CMAKE_COMMAND}" "-E" "make_directory" "${LINPHONE_BUILDER_WORK_DIR}/rpmbuild/SOURCES/")
-set(EP_soci_PATCH_COMMAND ${EP_soci_PATCH_COMMAND} "COMMAND" "${CMAKE_COMMAND}" "-E" "copy" "${EP_soci_URL}" "${LINPHONE_BUILDER_WORK_DIR}/rpmbuild/SOURCES/")
-set(EP_soci_PATCH_COMMAND ${EP_soci_PATCH_COMMAND} "COMMAND" "${CMAKE_COMMAND}" "-E" "copy" "${CMAKE_CURRENT_SOURCE_DIR}/builders/soci/soci_libdir.patch" "${LINPHONE_BUILDER_WORK_DIR}/rpmbuild/SOURCES/")
-set(EP_soci_PATCH_COMMAND ${EP_soci_PATCH_COMMAND} "COMMAND" "${CMAKE_COMMAND}" "-E" "copy" ${EP_soci_CONFIG_H_FILE} "<BINARY_DIR>")
+	"-DWITH_DB2=NO"
+	"-DWITH_FIREBIRD=NO"
+	"-DWITH_MYSQL=YES"
+	"-DWITH_ODBC=NO"
+	"-DWITH_ORACLE=NO"
+	"-DWITH_POSTGRESQL=NO"
+	"-DWITH_SQLITE3=YES"
+)
+lcb_package_source(YES)
+lcb_spec_file("soci.spec")
+lcb_linking_type("-DSOCI_SHARED=YES" "-DSOCI_STATIC=NO")
 
-# no configure needed for soci
-set(EP_soci_CONFIGURE_COMMAND_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/builders/soci/configure.sh.cmake)

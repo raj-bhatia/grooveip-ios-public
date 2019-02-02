@@ -81,8 +81,18 @@
 #pragma mark - Event Functions
 
 - (void)coreUpdateEvent:(NSNotification *)notif {
-	// Invalid all pointers
-	[self loadData];
+	@try {
+		// Invalid all pointers
+		[self loadData];
+	}
+	@catch (NSException *exception) {
+		if ([exception.name isEqualToString:@"LinphoneCoreException"]) {
+			LOGE(@"Core already destroyed");
+			return;
+		}
+		LOGE(@"Uncaught exception : %@", exception.description);
+		abort();
+	}
 }
 
 #pragma mark - Property Functions
@@ -133,8 +143,13 @@
 
 			// if this contact was already the previous entry, do not add it twice
 			LinphoneCallLog *prev = [eventsOnThisDay lastObject] ? [[eventsOnThisDay lastObject] pointerValue] : NULL;
+#if 0	// Changed Linphone code - "weak_equal" checks username and domain; domain can be a URL or IP address, and IP address may be different per call
 			if (prev && linphone_address_weak_equal(linphone_call_log_get_remote_address(prev),
 													linphone_call_log_get_remote_address(log))) {
+#else
+			if (prev && (0 == strcmp(linphone_address_get_username(linphone_call_log_get_remote_address(log)),
+						linphone_address_get_username(linphone_call_log_get_remote_address(prev))))) {
+#endif
 				bctbx_list_t *list = linphone_call_log_get_user_data(prev);
 				list = bctbx_list_append(list, log);
 				linphone_call_log_set_user_data(prev, list);
@@ -226,11 +241,11 @@
 				UIHistoryCell *cell = (UIHistoryCell *)[self tableView:tableView cellForRowAtIndexPath:indexPath];
 				[cell onDetails:self];
 			} else {
-				LinphoneAddress *addr = linphone_call_log_get_remote_address(callLog);
+				const LinphoneAddress *addr = linphone_call_log_get_remote_address(callLog);
 #if 1	// Changed Linphone code - Change domain to self domain otherwise the call will fail
 				LinphoneProxyConfig *config = linphone_core_get_default_proxy_config(LC);
 				const char *domain = linphone_proxy_config_get_domain(config);
-				linphone_address_set_domain(addr, domain);
+				linphone_address_set_domain((LinphoneAddress *) addr, domain);
 #endif
 				[LinphoneManager.instance call:addr];
 			}

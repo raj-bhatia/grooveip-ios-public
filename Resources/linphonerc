@@ -13,6 +13,7 @@ start_at_boot_preference=1
 stun_preference=stun.l.google.com:19302
 voiceproc_preference=1
 repeat_call_notification=1
+display_phone_only=0
 
 [in_app_purchase]
 #set to 1 if in-app purchases are to be shown in the application
@@ -48,13 +49,11 @@ max_calls=3
 real_early_media=1
 
 [net]
-download_bw=380
 edge_bw=10
 edge_ping_time=10
 firewall_policy=ice
 mtu=1300
 stun_server=stun.l.google.com:19302
-upload_bw=380
 
 [rtp]
 audio_jitt_comp=60
@@ -93,5 +92,5 @@ capture=1
 display=1
 enabled=1
 show_local=0
-size=qvga
+size=vga
 

@@ -18,9 +18,11 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
 #include "linphone/core.h"
+
+#include "c-wrapper/c-wrapper.h"
+
+// TODO: From coreapi. Remove me later.
 #include "private.h"
-
-
 
 static void linphone_buffer_destroy(LinphoneBuffer *buffer) {
 	if (buffer->content) belle_sip_free(buffer->content);
@@ -78,7 +80,7 @@ const uint8_t * linphone_buffer_get_content(const LinphoneBuffer *buffer) {
 void linphone_buffer_set_content(LinphoneBuffer *buffer, const uint8_t *content, size_t size) {
 	buffer->size = size;
 	if (buffer->content) belle_sip_free(buffer->content);
-	buffer->content = belle_sip_malloc(size + 1);
+	buffer->content = reinterpret_cast<uint8_t *>(belle_sip_malloc(size + 1));
 	memcpy(buffer->content, content, size);
     ((char *)buffer->content)[size] = '\0';
 }

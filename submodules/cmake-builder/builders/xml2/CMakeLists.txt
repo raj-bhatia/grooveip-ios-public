@@ -136,6 +136,11 @@ if(ENABLE_THREADS)
 else()
 	set(WITH_THREADS 0)
 endif()
+if(ENABLE_THREAD_ALLOC)
+	set(WITH_THREAD_ALLOC 1)
+else()
+	set(WITH_THREAD_ALLOC 0)
+endif()
 if(ENABLE_TREE)
 	set(WITH_TREE 1)
 else()
@@ -293,6 +298,7 @@ endif()
 
 
 set(SOURCE_FILES
+	buf.c
 	c14n.c
 	catalog.c
 	chvalid.c

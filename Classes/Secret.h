@@ -28,6 +28,12 @@
 #define MMS_URL @"Your Mms URL"
 #define PUT_MEDIA_URL @"Your PutMedia URL"
 #define GET_MEDIA_URL @"Your GetMedia URL"
+#define OUTGOING_CALL_URL @"Your OutgoingCall URL"
+#define VERIFY_URL @"Your Verify URL"
+#define REGISTER_URL @"Your Register URL"
+
+#define PORTAL_URL @"Your Portal URL"
+#define PAYPAL_URL @"Your PayPal URL (to purchase credits)"
 
 @interface Secret : NSObject
 
@@ -77,6 +83,25 @@
 + (NSString *) getHash_GetMedia : (NSString *) userId
 						  token : (NSString *) token
 					   fileName : (NSString *) fileName
+					  epochTime : (long) epochTime;
+
++ (NSString *) getHash_OutgoingCall : (NSString *) userId
+							  token : (NSString *) token
+					   calledNumber : (NSString *) calledNumber
+						  epochTime : (long) epochTime;
+
++ (NSString *) getHash_Verify : (NSString *) phoneNumber
+					  string1 : (NSString *) string1
+					  string2 : (NSString *) string2
+					epochTime : (long) epochTime;
+
++ (NSString *) getHash_Register : (NSString *) email
+					   password : (NSString *) password
+					deviceToken : (NSString *) deviceToken
+					serviceType : (NSString *) serviceType
+			   verificationCode : (NSString *) verificationCode
+				   mobileNumber : (NSString *) mobileNumber
+						  delta : (int) delta
 					  epochTime : (long) epochTime;
 
 @end

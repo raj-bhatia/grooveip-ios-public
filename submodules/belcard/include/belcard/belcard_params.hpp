@@ -19,8 +19,8 @@
 #ifndef belcard_params_hpp
 #define belcard_params_hpp
 
-#include <belr/grammarbuilder.hh>
-#include <belr/abnf.hh>
+#include <belr/grammarbuilder.h>
+#include <belr/abnf.h>
 #include "belcard_utils.hpp"
 #include "belcard_generic.hpp"
 
@@ -48,7 +48,7 @@ namespace belcard {
 		BELCARD_PUBLIC virtual void setValue(const std::string &value) ;
 		BELCARD_PUBLIC virtual const std::string &getValue() const;
 		
-		BELCARD_PUBLIC virtual void serialize(std::ostream &output) const;
+		BELCARD_PUBLIC void serialize(std::ostream &output) const override;
 	};
 	
 	class BelCardLanguageParam : public BelCardParam {

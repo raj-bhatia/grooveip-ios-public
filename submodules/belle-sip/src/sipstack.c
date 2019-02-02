@@ -1,24 +1,23 @@
 /*
 	belle-sip - SIP (RFC3261) library.
-    Copyright (C) 2010  Belledonne Communications SARL
+	Copyright (C) 2010-2018  Belledonne Communications SARL
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 2 of the License, or
+	(at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "belle_sip_internal.h"
 #include "listeningpoint_internal.h"
-
 
 belle_sip_hop_t* belle_sip_hop_new(const char* transport, const char *cname, const char* host,int port) {
 	belle_sip_hop_t* hop = belle_sip_object_new(belle_sip_hop_t);
@@ -59,7 +58,7 @@ belle_sip_hop_t* belle_sip_hop_new_from_generic_uri(const belle_generic_uri_t *u
 	const char *scheme=belle_generic_uri_get_scheme(uri);
 	int port=belle_generic_uri_get_port(uri);
 	int well_known_port=0;
-	
+
 	host=belle_generic_uri_get_host(uri);
 	if (strcasecmp(scheme,"http")==0) {
 		transport="TCP";
@@ -97,7 +96,7 @@ static void belle_sip_hop_clone(belle_sip_hop_t *hop, const belle_sip_hop_t *ori
 		hop->cname=belle_sip_strdup(orig->cname);
 	if (orig->transport)
 		hop->transport=belle_sip_strdup(orig->transport);
-	
+
 }
 
 BELLE_SIP_DECLARE_NO_IMPLEMENTED_INTERFACES(belle_sip_hop_t);
@@ -112,7 +111,7 @@ static void belle_sip_stack_destroy(belle_sip_stack_t *stack){
 	if (stack->http_proxy_passwd) belle_sip_free(stack->http_proxy_passwd);
 	if (stack->http_proxy_username) belle_sip_free(stack->http_proxy_username);
 	belle_sip_list_free_with_data(stack->dns_servers, belle_sip_free);
-
+	bctbx_uninit_logger();
 }
 
 BELLE_SIP_DECLARE_NO_IMPLEMENTED_INTERFACES(belle_sip_stack_t);
@@ -120,6 +119,7 @@ BELLE_SIP_INSTANCIATE_VPTR(belle_sip_stack_t,belle_sip_object_t,belle_sip_stack_
 
 belle_sip_stack_t * belle_sip_stack_new(const char *properties){
 	belle_sip_stack_t *stack=belle_sip_object_new(belle_sip_stack_t);
+	bctbx_init_logger(FALSE);
 	stack->ml=belle_sip_main_loop_new ();
 	stack->timer_config.T1=500;
 	stack->timer_config.T2=4000;
@@ -315,3 +315,14 @@ int belle_sip_stack_content_encoding_available(belle_sip_stack_t *stack, const c
 GET_SET_STRING(belle_sip_stack,http_proxy_host)
 GET_SET_INT(belle_sip_stack,http_proxy_port, int)
 
+void  belle_sip_set_log_handler(belle_sip_log_function_t func) {
+	bctbx_set_log_handler_for_domain(func, BCTBX_LOG_DOMAIN);
+}
+
+void belle_sip_stack_enable_reconnect_to_primary_asap(belle_sip_stack_t *stack, int enabled) {
+	stack->reconnect_to_primary_asap=enabled;
+}
+
+int belle_sip_stack_reconnect_to_primary_asap_enabled(const belle_sip_stack_t *stack) {
+	return stack->reconnect_to_primary_asap;
+}

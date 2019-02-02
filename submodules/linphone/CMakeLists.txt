@@ -21,7 +21,7 @@
 ############################################################################
 
 cmake_minimum_required(VERSION 3.0)
-project(linphone VERSION 3.11.2 LANGUAGES C CXX)
+project(linphone VERSION 3.12.0 LANGUAGES C CXX)
 
 
 set(LINPHONE_MAJOR_VERSION ${PROJECT_VERSION_MAJOR})
@@ -35,37 +35,47 @@ string(REGEX REPLACE "([a-zA-Z_]+)\\.po" "\\1" LINPHONE_ALL_LANGS_LIST "${LINPHO
 string(REPLACE ";" " " LINPHONE_ALL_LANGS "${LINPHONE_ALL_LANGS_LIST}")
 
 include(CMakeDependentOption)
+include(cmake/Tools.cmake)
 
 option(ENABLE_SHARED "Build shared library." YES)
 option(ENABLE_STATIC "Build static library." YES)
+
 option(ENABLE_CONSOLE_UI "Turn on or off compilation of console interface." YES)
-option(ENABLE_DATE "Use build date in internal version number." NO)
+option(ENABLE_CSHARP_WRAPPER "Build the C# wrapper for Liblinphone." OFF)
+option(ENABLE_JAVA_WRAPPER "Build the Java wrapper for Liblinphone." OFF)
+option(ENABLE_CXX_WRAPPER "Build the C++ wrapper for Liblinphone." YES)
 option(ENABLE_DAEMON "Enable the linphone daemon interface." YES)
-option(ENABLE_DOC "Enable documentation generation with Doxygen." YES)
+option(ENABLE_DATE "Use build date in internal version number." NO)
+option(ENABLE_DEBUG_LOGS "Turn on or off debug level logs." NO)
+option(ENABLE_DOC "Enable API documentation generation." NO)
 option(ENABLE_JAVADOC "Add a target to generate documentation for Java API" NO)
-option(ENABLE_GTK_UI "Turn on or off compilation of gtk interface." YES)
 option(ENABLE_LDAP "Enable LDAP support." NO)
-option(ENABLE_SQLITE_STORAGE "Turn on compilation sqlite storage, for messages, contacts, history" YES)
-cmake_dependent_option(ENABLE_LIME "Enable Instant Messaging Encryption." YES "ENABLE_SQLITE_STORAGE" NO)
-cmake_dependent_option(ENABLE_NOTIFY "Enable libnotify support." YES "ENABLE_GTK_UI;NOT APPLE" NO)
 option(ENABLE_RELATIVE_PREFIX "Find resources relatively to the installation directory." NO)
+option(ENABLE_ROOTCA_DOWNLOAD "Download rootca.pem at build time." YES)
+option(ENABLE_SOCI_STORAGE "Turn on compilation soci storage, for messages, contacts, history" YES)
+option(ENABLE_SQLITE_STORAGE "Turn on compilation sqlite storage, for messages, contacts, history" YES)
 option(ENABLE_STRICT "Build with strict compile options." YES)
 option(ENABLE_TOOLS "Turn on or off compilation of tools." YES)
 option(ENABLE_TUNNEL "Turn on compilation of tunnel support." NO)
 option(ENABLE_TUTORIALS "Enable compilation of tutorials." YES)
 option(ENABLE_UNIT_TESTS "Enable compilation of unit tests." YES)
 option(ENABLE_UPDATE_CHECK "Enable update check." NO)
-option(ENABLE_VIDEO "Build with video support." YES)
-cmake_dependent_option(ENABLE_ASSISTANT "Turn on assistant compiling." YES "ENABLE_GTK_UI" NO)
-option(ENABLE_DEBUG_LOGS "Turn on or off debug level logs." NO)
-option(ENABLE_NLS "Build with internationalisation support" YES)
 option(ENABLE_VCARD "Turn on compilation of vcard4 support." YES)
-option(ENABLE_ROOTCA_DOWNLOAD "Download rootca.pem at build time." YES)
-option(ENABLE_CXX_WRAPPER "Build the C++ wrapper for Liblinphone." OFF)
-option(ENABLE_CSHARP_WRAPPER "Build the C# wrapper for Liblinphone." OFF)
+option(ENABLE_VIDEO "Build with video support." YES)
+
+cmake_dependent_option(ENABLE_LIME "Enable Instant Messaging Encryption." YES "ENABLE_SQLITE_STORAGE" NO)
+cmake_dependent_option(ENABLE_NOTIFY "Enable libnotify support." YES "ENABLE_GTK_UI;NOT APPLE" NO)
+cmake_dependent_option(ENABLE_ASSISTANT "Turn on assistant compiling." YES "ENABLE_GTK_UI" NO)
 
 set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_EXTENSIONS NO)
 
+if(NOT CMAKE_BUILD_TYPE)
+	set(CMAKE_BUILD_TYPE "Release")
+endif()
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+	add_definitions("-DDEBUG")
+endif()
 
 if(ENABLE_STATIC)
 	set(LINPHONE_LIBS_FOR_TOOLS linphone-static)
@@ -81,6 +91,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(CheckSymbolExists)
 include(CMakePushCheckState)
 include(GNUInstallDirs)
+include(CheckCXXCompilerFlag)
 
 if(NOT CMAKE_INSTALL_RPATH AND CMAKE_INSTALL_PREFIX)
 	set(CMAKE_INSTALL_RPATH ${CMAKE_INSTALL_FULL_LIBDIR})
@@ -115,13 +126,17 @@ if(LINPHONE_BUILDER_GROUP_EXTERNAL_SOURCE_PATH_BUILDERS)
 	include("${EP_ortp_CONFIG_DIR}/ORTPConfig.cmake")
 	set(BcToolbox_FIND_COMPONENTS tester)
 	include("${EP_bctoolbox_CONFIG_DIR}/BcToolboxConfig.cmake")
+	include("${EP_belr_CONFIG_DIR}/BelrConfig.cmake")
 else()
 	find_package(BelleSIP REQUIRED)
 	find_package(Mediastreamer2 REQUIRED)
 	find_package(ORTP REQUIRED)
 	find_package(BcToolbox 0.0.3 REQUIRED OPTIONAL_COMPONENTS tester)
+	find_package(Belr REQUIRED)
 endif()
 find_package(XML2 REQUIRED)
+find_package(LibXsd REQUIRED)
+find_package(Soci)
 find_package(Zlib)
 if(ENABLE_TUNNEL)
 	if(LINPHONE_BUILDER_GROUP_EXTERNAL_SOURCE_PATH_BUILDERS)
@@ -146,31 +161,8 @@ if(ENABLE_NOTIFY)
 		set(ENABLE_NOTIFY OFF CACHE BOOL "Enable libnotify support." FORCE)
 	endif()
 endif()
-if(ENABLE_GTK_UI)
-	if(WIN32)
-		set(GTK2_ADDITIONAL_SUFFIXES "../lib/glib-2.0/include" "../lib/gtk-2.0/include")
-	endif()
-	find_package(GTK2 2.18 REQUIRED gtk)
-	if(ENABLE_ASSISTANT AND GTK2_VERSION VERSION_LESS 2.22)
-		message(WARNING "You need at least GTK 2.22 to enable the assistant")
-		set(ENABLE_ASSISTANT OFF CACHE BOOL "Turn on assistant compiling." FORCE)
-	endif()
-	if(APPLE)
-		find_package(GtkMacIntegration)
-		if(GTKMACINTEGRATION_FOUND)
-			set(HAVE_GTK_OSX 1)
-			add_definitions("${GTKMACINTEGRATION_CPPFLAGS}")
-		else()
-			message(WARNING "gtk-mac-integration not found. Please install gtk-osx-application package.")
-		endif()
-	endif()
-endif()
 if(ENABLE_ASSISTANT)
 	set(BUILD_WIZARD 1)
-endif()
-if(ENABLE_NLS)
-	find_package(Gettext REQUIRED)
-	find_package(Intl REQUIRED)
 endif()
 if(ENABLE_LIME)
 	#bzrtp is only required for LIME
@@ -181,8 +173,15 @@ if(ENABLE_LIME)
 	endif()
 	set(HAVE_LIME 1)
 endif()
-if(ENABLE_CXX_WRAPPER OR ENABLE_CSHARP_WRAPPER)
+if(ENABLE_CXX_WRAPPER OR ENABLE_CSHARP_WRAPPER OR ENABLE_JAVA_WRAPPER OR ENABLE_DOC)
 	find_package(PythonInterp REQUIRED)
+	check_python_module(pystache)
+	check_python_module(six)
+	if(ENABLE_DOC)
+		check_python_module(sphinx)
+		check_python_module(javasphinx)
+		check_python_module(sphinx_csharp)
+	endif()
 endif()
 
 if(UNIX AND NOT APPLE)
@@ -190,23 +189,38 @@ if(UNIX AND NOT APPLE)
 	check_include_files(libudev.h HAVE_LIBUDEV_H)
 endif()
 
+if(MSVC AND NOT CMAKE_SYSTEM_NAME STREQUAL "WindowsPhone" AND NOT CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
+	find_library(LIBGCC NAMES gcc)
+	find_library(LIBMINGWEX NAMES mingwex)
+endif()
+
+if(NOT WIN32)
+	find_package(Iconv QUIET)
+endif()
+if(ANDROID)
+	find_package(CpuFeatures REQUIRED)
+	find_package(Support REQUIRED)
+endif()
+
 set(LINPHONE_LDFLAGS "${BELLESIP_LDFLAGS} ${MEDIASTREAMER2_LDFLAGS}")
 if(BELCARD_FOUND AND APPLE)
-    set(LINPHONE_LDFLAGS "${LINPHONE_LDFLAGS} -stdlib=libc++")
+	set(LINPHONE_LDFLAGS "${LINPHONE_LDFLAGS} -stdlib=libc++")
 endif()
 
 # include_directories must be called only UNDER THIS LINE in order to use our
 # projects submodules first (we do NOT want to have system headers in first position)
 include_directories(
-	include/
-	coreapi/
 	${CMAKE_CURRENT_BINARY_DIR}
 	${CMAKE_CURRENT_BINARY_DIR}/coreapi/
+	coreapi/
+	include/
+	src/
 )
 set(LINPHONE_INCLUDE_DIRS
 	${BELLESIP_INCLUDE_DIRS}
 	${MEDIASTREAMER2_INCLUDE_DIRS}
 	${BCTOOLBOX_CORE_INCLUDE_DIRS}
+	${BELR_INCLUDE_DIRS}
 )
 if (BZRTP_FOUND)
 	list(APPEND LINPHONE_INCLUDE_DIRS ${BZRTP_INCLUDE_DIRS})
@@ -241,8 +255,7 @@ if(MSVC)
 	include_directories(${MSVC_INCLUDE_DIR})
 endif()
 
-add_definitions("-DLINPHONE_EXPORTS")
-set(LINPHONE_CPPFLAGS ${BELCARD_CPPFLAGS} ${BELLESIP_CPPFLAGS} ${MEDIASTREAMER2_CPPFLAGS} ${BCTOOLBOX_CPPFLAGS})
+set(LINPHONE_CPPFLAGS ${BELCARD_CPPFLAGS} ${BELLESIP_CPPFLAGS} ${MEDIASTREAMER2_CPPFLAGS} ${BCTOOLBOX_CPPFLAGS} ${BELR_CPPFLAGS})
 if(ENABLE_STATIC)
 	list(APPEND LINPHONE_CPPFLAGS "-DLINPHONE_STATIC")
 endif()
@@ -252,7 +265,12 @@ if(LINPHONE_CPPFLAGS)
 endif()
 
 if(ENABLE_DEBUG_LOGS)
-	add_definitions("-DDEBUG")
+	add_definitions("-DDEBUG_LOGS")
+endif()
+
+# Enable stdint.h limit macros on C++ files. (Windows only.)
+if(MSVC)
+	add_definitions("-D__STDC_LIMIT_MACROS")
 endif()
 
 set(STRICT_OPTIONS_CPP )
@@ -266,13 +284,35 @@ if(MSVC)
 		list(APPEND STRICT_OPTIONS_CPP "/WX")
 	endif()
 else()
-	list(APPEND STRICT_OPTIONS_CPP "-Wall" "-Wuninitialized" "-Wno-error=deprecated-declarations")
+	list(APPEND STRICT_OPTIONS_CPP
+		"-Wall"
+		"-Wcast-align"
+		"-Wconversion"
+		"-Werror=return-type"
+		"-Wfloat-equal"
+		"-Winit-self"
+		"-Wno-error=deprecated-declarations"
+		"-Wpointer-arith"
+		"-Wuninitialized"
+		"-Wunused"
+	)
+	list(APPEND STRICT_OPTIONS_CXX
+		"-Wnon-virtual-dtor"
+		"-Woverloaded-virtual"
+	)
+	CHECK_CXX_COMPILER_FLAG("-Wsuggest-override" SUGGEST_OVERRIDE)
+	if (SUGGEST_OVERRIDE)
+		list(APPEND STRICT_OPTIONS_CXX "-Wsuggest-override" "-Wno-error=suggest-override" )
+	endif ()
 	list(APPEND STRICT_OPTIONS_C "-Wstrict-prototypes" "-Werror=strict-prototypes")
 	if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
 		list(APPEND STRICT_OPTIONS_C "-fno-inline-small-functions")
 	endif()
-	if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+	if(CMAKE_C_COMPILER_ID MATCHES "Clang")
 		list(APPEND STRICT_OPTIONS_CPP "-Qunused-arguments" "-Wno-array-bounds")
+	endif()
+	if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+		list(APPEND STRICT_OPTIONS_CXX "-x c++")
 	endif()
 	if(APPLE)
 		list(APPEND STRICT_OPTIONS_CPP "-Wno-error=unknown-warning-option" "-Qunused-arguments" "-Wno-tautological-compare" "-Wno-unused-function" "-Wno-array-bounds")
@@ -289,7 +329,6 @@ if(STRICT_OPTIONS_C)
 	list(REMOVE_DUPLICATES STRICT_OPTIONS_C)
 endif()
 
-
 set(GETTEXT_PACKAGE "linphone")
 if(ENABLE_RELATIVE_PREFIX)
 	set(LINPHONE_DATA_DIR ".")
@@ -302,6 +341,7 @@ if(WIN32)
 endif()
 set(PACKAGE_LOCALE_DIR "${LINPHONE_DATA_DIR}/${CMAKE_INSTALL_DATADIR}/locale")
 set(PACKAGE_DATA_DIR "${LINPHONE_DATA_DIR}/${CMAKE_INSTALL_DATADIR}")
+set(PACKAGE_GRAMMAR_DIR "${LINPHONE_DATA_DIR}/${CMAKE_INSTALL_DATADIR}/belr/grammars")
 set(PACKAGE_SOUND_DIR "${LINPHONE_DATA_DIR}/${CMAKE_INSTALL_DATADIR}/sounds/linphone")
 set(PACKAGE_RING_DIR "${PACKAGE_SOUND_DIR}/rings")
 set(PACKAGE_FREEDESKTOP_DIR "${PACKAGE_DATA_DIR}/applications")
@@ -323,18 +363,17 @@ endif()
 
 add_subdirectory(include)
 add_subdirectory(java)
+if(ENABLE_JAVA_WRAPPER)
+	add_subdirectory(wrappers/java)
+endif()
 add_subdirectory(coreapi)
+add_subdirectory(src)
 add_subdirectory(share)
 if(ENABLE_CONSOLE_UI)
 	add_subdirectory(console)
 endif()
 if(ENABLE_DAEMON)
 	add_subdirectory(daemon)
-endif()
-if(ENABLE_GTK_UI)
-	add_subdirectory(gtk)
-	add_subdirectory(pixmaps)
-	add_subdirectory(po)
 endif()
 if(ENABLE_TOOLS)
 	add_subdirectory(tools)
@@ -374,17 +413,4 @@ install(FILES
 	DESTINATION ${CONFIG_PACKAGE_LOCATION}
 )
 
-
-# CPack settings
-set(CPACK_PACKAGE_NAME "linphone")
-set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
-set(CPACK_SOURCE_GENERATOR "TGZ")
-set(CPACK_SOURCE_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}")
-set(CPACK_SOURCE_IGNORE_FILES
-        "^${CMAKE_BINARY_DIR}"
-        "/\\\\..+"
-	"^${CMAKE_SOURCE_DIR}/mediastreamer2"
-	"^${CMAKE_SOURCE_DIR}/oRTP"
-)
-
-include(CPack)
+add_subdirectory(build)

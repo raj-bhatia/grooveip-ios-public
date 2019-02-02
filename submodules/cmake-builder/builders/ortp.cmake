@@ -25,15 +25,14 @@ lcb_git_tag_latest("master")
 lcb_git_tag("0.27.0")
 lcb_external_source_paths("oRTP" "ortp")
 lcb_groupable(YES)
+lcb_sanitizable(YES)
+lcb_package_source(YES)
 
 lcb_dependencies("bctoolbox")
 lcb_spec_file("ortp.spec")
 
-lcb_cmake_options("-DENABLE_DOC=${ENABLE_DOC}")
-
-if(EP_ortp_BUILD_METHOD STREQUAL "rpm")
-        message("using rpm")
-	set(EP_ortp_CONFIGURE_COMMAND_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/builders/ortp/configure.sh.rpm.cmake)
-        set(EP_ortp_BUILD_COMMAND_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/builders/ortp/build.sh.rpm.cmake)
-endif()
+lcb_cmake_options(
+	"-DENABLE_DOC=${ENABLE_DOC}"
+	"-DENABLE_UNIT_TESTS=${ENABLE_UNIT_TESTS}"
+)
 

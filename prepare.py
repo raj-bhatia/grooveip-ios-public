@@ -49,7 +49,11 @@ class IOSTarget(prepare.Target):
         self.config_file = 'configs/config-ios-' + arch + '.cmake'
         self.toolchain_file = 'toolchains/toolchain-ios-' + arch + '.cmake'
         self.output = 'liblinphone-sdk/' + arch + '-apple-darwin.ios'
-	self.external_source_path = os.path.join(current_path, 'submodules')
+        self.external_source_path = os.path.join(current_path, 'submodules')
+        external_builders_path = os.path.join(current_path, 'cmake_builder')
+        self.additional_args = [
+            "-DLINPHONE_BUILDER_EXTERNAL_BUILDERS_PATH=" + external_builders_path
+        ]
 
 
 class IOSi386Target(IOSTarget):
@@ -349,6 +353,9 @@ zipsdk: sdk
 \t-x liblinphone-tutorials/hello-world/hello-world.xcodeproj/*.pbxuser \\
 \t-x liblinphone-tutorials/hello-world/hello-world.xcodeproj/*.mode1v3
 
+podspec: zipsdk
+\tsed "s/FRAMEWORK_VERSION/$(LINPHONE_IPHONE_VERSION)/g" Tools/liblinphone.podspec > liblinphone.podspec
+
 pull-transifex:
 \ttx pull -af
 
@@ -394,7 +401,6 @@ def main():
     if preparator.check_environment() != 0:
         preparator.show_environment_errors()
         return 1
-    preparator.install_git_hook()
     return preparator.run()
 
 if __name__ == "__main__":

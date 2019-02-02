@@ -21,7 +21,7 @@
 ############################################################################
 
 cmake_minimum_required(VERSION 3.0)
-project(SRTP C)
+project(SRTP2 C)
 
 
 option(ENABLE_STATIC "Build static library (default is shared library)." NO)
@@ -71,6 +71,8 @@ if(UNIX)
 	endif()
 endif()
 
+set(PACKAGE_STRING "libsrtp2 2.2.0-pre")
+set(PACKAGE_VERSION "2.0.1-pre")
 set(GENERIC_AESICM ${ENABLE_GENERIC_AESICM})
 set(USE_SYSLOG ${ENABLE_SYSLOG})
 set(ERR_REPORTING_STDOUT ${ENABLE_STDOUT})
@@ -158,9 +160,8 @@ add_subdirectory(include)
 add_subdirectory(crypto/include)
 
 
-if(MSVC)
-	add_definitions("/W3")
-else()
+add_definitions("-DHAVE_CONFIG_H=1")
+if(NOT MSVC)
 	add_definitions("-Wall -fexpensive-optimizations -funroll-loops -fPIC")
 endif()
 
@@ -169,7 +170,6 @@ source_group(ciphers FILES
 	crypto/cipher/null_cipher.c
 	crypto/cipher/aes.c
 	crypto/cipher/aes_icm.c
-	crypto/cipher/aes_cbc.c
 )
 
 source_group(hashes FILES
@@ -189,9 +189,6 @@ source_group(kernel FILES
 	crypto/kernel/crypto_kernel.c
 	crypto/kernel/alloc.c
 	crypto/kernel/key.c
-	crypto/rng/${RNG_SOURCE}
-	crypto/rng/prng.c
-	crypto/rng/ctr_prng.c
 	crypto/kernel/err.c
 	#crypto/ust/ust.c
 )
@@ -212,7 +209,6 @@ set(SRTP_SOURCE_FILES
 	crypto/cipher/null_cipher.c
 	crypto/cipher/aes.c
 	crypto/cipher/aes_icm.c
-	crypto/cipher/aes_cbc.c
 	crypto/hash/null_auth.c
 	crypto/hash/sha1.c
 	crypto/hash/hmac.c
@@ -223,9 +219,6 @@ set(SRTP_SOURCE_FILES
 	crypto/kernel/crypto_kernel.c
 	crypto/kernel/alloc.c
 	crypto/kernel/key.c
-	crypto/rng/${RNG_SOURCE}
-	crypto/rng/prng.c
-	crypto/rng/ctr_prng.c
 	crypto/kernel/err.c
 	#crypto/ust/ust.c
 	crypto/replay/rdb.c
@@ -239,6 +232,9 @@ set(SRTP_SOURCE_FILES
 if(WIN32)
 	list(APPEND SRTP_SOURCE_FILES srtp.def)
 endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
+	set_source_files_properties(crypto/kernel/crypto_kernel.c PROPERTIES COMPILE_FLAGS "/wd4703")
+endif()
 set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/config.h PROPERTIES GENERATED ON)
 
 if(ENABLE_STATIC)
@@ -246,7 +242,7 @@ if(ENABLE_STATIC)
 	target_link_libraries(srtp ${LIBS})
 else()
 	add_library(srtp SHARED ${SRTP_SOURCE_FILES})
-	set_target_properties(srtp PROPERTIES VERSION 1)
+	set_target_properties(srtp PROPERTIES VERSION 2)
 	target_link_libraries(srtp ${LIBS})
 	if(MSVC)
 		if(CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -257,6 +253,7 @@ else()
 		endif()
 	endif()
 endif()
+set_target_properties(srtp PROPERTIES  OUTPUT_NAME "srtp2")
 target_compile_options(srtp PRIVATE "-w")
 
 install(TARGETS srtp
@@ -266,7 +263,7 @@ install(TARGETS srtp
 	PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
 )
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/config.h
-	DESTINATION include/srtp
+	DESTINATION include/srtp2
 	PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
 )
 

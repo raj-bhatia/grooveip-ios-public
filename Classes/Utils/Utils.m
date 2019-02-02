@@ -1,3 +1,4 @@
+
 /* Utils.m
  *
  * Copyright (C) 2012  Belledonne Comunications, Grenoble, France
@@ -58,7 +59,11 @@
 	}
 
 	if (!ret) {
+#if 0	// Changed Linphone cocde - Use GrooVe IP icon
 		ret = [UIImage imageNamed:@"avatar.png"];
+#else
+		ret = [UIImage imageNamed:@"LauncherIcon_default.png"];
+#endif
 	}
 	return ret;
 }
@@ -70,6 +75,14 @@
 		duration = duration % 3600;
 	}
 	return [result stringByAppendingString:[NSString stringWithFormat:@"%02i:%02i", (duration / 60), (duration % 60)]];
+}
+
++ (NSString *) intervalToString:(NSTimeInterval)interval {
+	NSDateComponentsFormatter *formatter = [[NSDateComponentsFormatter alloc] init];
+	formatter.allowedUnits = NSCalendarUnitSecond;
+	formatter.unitsStyle = NSDateComponentsFormatterUnitsStyleAbbreviated;
+	formatter.zeroFormattingBehavior = NSDateComponentsFormatterZeroFormattingBehaviorDropAll;
+	return [formatter stringFromTimeInterval:interval];
 }
 
 + (NSString *)timeToString:(time_t)time withFormat:(LinphoneDateFormat)format {
@@ -454,56 +467,57 @@
 }
 
 + (LinphoneAddress *)normalizeSipOrPhoneAddress:(NSString *)value {
-	if (!value) {
-		return NULL;
-	}
-	LinphoneProxyConfig *cfg = linphone_core_get_default_proxy_config(LC);
-	const char * normvalue;
-	if (linphone_proxy_config_is_phone_number(cfg, value.UTF8String)) {
-		normvalue = linphone_proxy_config_normalize_phone_number(cfg, value.UTF8String);
-	} else {
-		normvalue = value.UTF8String;
-	}
-	LinphoneAddress *addr = linphone_proxy_config_normalize_sip_uri(cfg, normvalue);
+  	if (!value || [value isEqualToString:@""])
+    	return NULL;
 	
-	// first try to find a friend with the given address
-	Contact *c = [FastAddressBook getContactWithAddress:addr];
-	if (c && c.friend) {
-		LinphoneFriend *f = c.friend;
-		const LinphonePresenceModel *m =
-			f ? linphone_friend_get_presence_model_for_uri_or_tel(f, value.UTF8String) : NULL;
-		const char *contact = m ? linphone_presence_model_get_contact(m) : NULL;
-		if (contact) {
-			LinphoneAddress *contact_addr = linphone_address_new(contact);
-			if (contact_addr) {
+#if 1	// Changed Linphone code
+	NSString *value2 = [self normalizePhoneNumber : value];
+	LinphoneProxyConfig *cfg = linphone_core_get_default_proxy_config(LC);
+	LinphoneAddress *addr = linphone_proxy_config_normalize_sip_uri(cfg, [value2 UTF8String]);
+#else
+  	LinphoneProxyConfig *cfg = linphone_core_get_default_proxy_config(LC);
+  	const char *normvalue;
+	normvalue = linphone_proxy_config_is_phone_number(cfg, value.UTF8String)
+	  	? linphone_proxy_config_normalize_phone_number(cfg, value.UTF8String)
+		: value.UTF8String;
+
+  	LinphoneAddress *addr = linphone_proxy_config_normalize_sip_uri(cfg, normvalue);
+  	// first try to find a friend with the given address
+  	Contact *c = [FastAddressBook getContactWithAddress:addr];
+
+  	if (c && c.friend) {
+    	LinphoneFriend *f = c.friend;
+    	const LinphonePresenceModel *m = f
+			? linphone_friend_get_presence_model_for_uri_or_tel(f, value.UTF8String)
+			: NULL;
+    	const char *contact = m ? linphone_presence_model_get_contact(m) : NULL;
+    	if (contact) {
+      		LinphoneAddress *contact_addr = linphone_address_new(contact);
+      		if (contact_addr) {
 				linphone_address_destroy(addr);
-				return contact_addr;
-			}
-		}
+        		return contact_addr;
+      		}
+    	}
 	}
 
-	// since user wants to escape plus, we assume it expects to have phone numbers by default
-	if (addr) {
-		if (cfg && (linphone_proxy_config_get_dial_escape_plus(cfg))) {
-			if (linphone_proxy_config_is_phone_number(cfg, normvalue)) {
-				linphone_address_set_username(addr, normvalue);
-			}
-		} else {
-			if (linphone_proxy_config_is_phone_number(cfg, value.UTF8String)) {
-				linphone_address_set_username(addr, value.UTF8String);
-			}
-		}
-	}
-
+	// since user wants to escape plus, we assume it expects to have phone
+	// numbers by default
+	if (addr && cfg) {
+		const char *username = linphone_proxy_config_get_dial_escape_plus(cfg) ? normvalue : value.UTF8String;
+		if (linphone_proxy_config_is_phone_number(cfg, username))
+			linphone_address_set_username(addr, username);
+	 }
+#endif
 	return addr;
 }
 
+#if 1	// Changed Linphone code
 + (NSString *) normalizePhoneNumber:(NSString *)inputString {
 	if ([inputString containsString:@"sip"]) {	// This is a SIP URI, not a phone number--just return without further processing
 		return inputString;
 	}
 	unsigned long size = [inputString length];
-	if (size >= 32) {	// Phone number cannot be this long--just return without further processing
+	if (size >= 64) {	// Phone number cannot be this long--just return without further processing
 		return inputString;
 	}
 	
@@ -513,9 +527,12 @@
 	int index = 0;
 	
 	// Remove all characters that are not digits or the '+' sign
+	size = strlen(in);
 	for (int i = 0; i < size; i++) {
 		if (((in[i] >= '0') && (in[i] <= '9')) || (in[i] == '+')) {
 			temp[index++] = in[i];
+		} else if (in[i] == '%') {
+			i += 2;	// Remove the 3 character long escape sequence
 		}
 	}
 	temp[index] = '\0';
@@ -549,6 +566,7 @@
 	NSRange range = NSMakeRange(start, end - start);
 	return [uri substringWithRange:range];
 }
+#endif
 
 @end
 
@@ -630,6 +648,22 @@
 	}
 }
 #endif
+
++ (void)setDisplayNameLabel:(UILabel *)label forAddress:(const LinphoneAddress *)addr withAddressLabel:(UILabel*)addressLabel{
+	Contact *contact = [FastAddressBook getContactWithAddress:addr];
+	if (contact) {
+		[ContactDisplay setDisplayNameLabel:label forContact:contact];
+		addressLabel.text = [NSString stringWithUTF8String:linphone_address_as_string_uri_only(addr)];
+		addressLabel.hidden = FALSE;
+	} else {
+		label.text = [FastAddressBook displayNameForAddress:addr];
+		if([LinphoneManager.instance lpConfigBoolForKey:@"display_phone_only" inSection:@"app"])
+			addressLabel.hidden = TRUE;
+		else
+			addressLabel.text = [NSString stringWithUTF8String:linphone_address_as_string_uri_only(addr)];
+	}
+}
+
 
 @end
 

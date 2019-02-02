@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.XIB" version="3.0" toolsVersion="13771" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES">
+    <device id="retina4_0" orientation="portrait">
+        <adaptation id="fullscreen"/>
+    </device>
+    <dependencies>
+        <deployment identifier="iOS"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="13772"/>
+        <capability name="Safe area layout guides" minToolsVersion="9.0"/>
+        <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
+    </dependencies>
+    <objects>
+        <placeholder placeholderIdentifier="IBFilesOwner" id="-1" userLabel="File's Owner" customClass="AreaCodeView">
+            <connections>
+                <outlet property="activityIndicator" destination="Uk1-NH-oZw" id="QyS-Te-fIA"/>
+                <outlet property="areaCodeField" destination="E2I-Uk-Fhs" id="MFt-r4-Csg"/>
+                <outlet property="showButton" destination="wt1-3W-cgA" id="iY7-ns-X7a"/>
+                <outlet property="view" destination="i5M-Pr-FkT" id="sfx-zR-JGt"/>
+            </connections>
+        </placeholder>
+        <placeholder placeholderIdentifier="IBFirstResponder" id="-2" customClass="UIResponder"/>
+        <view clearsContextBeforeDrawing="NO" contentMode="scaleToFill" id="i5M-Pr-FkT">
+            <rect key="frame" x="0.0" y="0.0" width="320" height="568"/>
+            <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+            <subviews>
+                <imageView userInteractionEnabled="NO" contentMode="scaleToFill" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="LauncherIcon_default.png" translatesAutoresizingMaskIntoConstraints="NO" id="Obg-oH-5rT">
+                    <rect key="frame" x="45" y="50" width="90" height="90"/>
+                    <constraints>
+                        <constraint firstAttribute="width" constant="90" id="BBg-PO-ObT"/>
+                        <constraint firstAttribute="height" constant="90" id="bfy-eK-r6N"/>
+                    </constraints>
+                </imageView>
+                <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="Area Code" textAlignment="natural" lineBreakMode="tailTruncation" numberOfLines="2" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="HkS-D6-wma">
+                    <rect key="frame" x="165" y="47" width="105" height="96"/>
+                    <fontDescription key="fontDescription" type="boldSystem" pointSize="40"/>
+                    <nil key="textColor"/>
+                    <nil key="highlightedColor"/>
+                </label>
+                <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" usesAttributedText="YES" lineBreakMode="tailTruncation" numberOfLines="4" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="6N2-4T-33U">
+                    <rect key="frame" x="45" y="165" width="140" height="85"/>
+                    <constraints>
+                        <constraint firstAttribute="height" constant="85" id="4Tb-ET-3Dk"/>
+                        <constraint firstAttribute="width" constant="140" id="Bwk-cC-jrr"/>
+                    </constraints>
+                    <attributedString key="attributedText">
+                        <fragment content="Desired Area Code for ">
+                            <attributes>
+                                <font key="NSFont" size="16" name="ArialMT"/>
+                                <paragraphStyle key="NSParagraphStyle" alignment="left" lineBreakMode="wordWrapping" baseWritingDirection="natural" tighteningFactorForTruncation="0.0"/>
+                            </attributes>
+                        </fragment>
+                        <fragment content="ONE-Phone">
+                            <attributes>
+                                <font key="NSFont" size="16" name="Arial-ItalicMT"/>
+                                <paragraphStyle key="NSParagraphStyle" alignment="left" lineBreakMode="wordWrapping" baseWritingDirection="natural" tighteningFactorForTruncation="0.0"/>
+                            </attributes>
+                        </fragment>
+                        <fragment content=" Number (US or Canada only)">
+                            <attributes>
+                                <font key="NSFont" size="16" name="ArialMT"/>
+                                <paragraphStyle key="NSParagraphStyle" alignment="left" lineBreakMode="wordWrapping" baseWritingDirection="natural" tighteningFactorForTruncation="0.0"/>
+                            </attributes>
+                        </fragment>
+                    </attributedString>
+                    <nil key="highlightedColor"/>
+                </label>
+                <textField opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="left" contentVerticalAlignment="center" borderStyle="roundedRect" textAlignment="natural" minimumFontSize="17" translatesAutoresizingMaskIntoConstraints="NO" id="E2I-Uk-Fhs">
+                    <rect key="frame" x="205" y="192.5" width="80" height="30"/>
+                    <constraints>
+                        <constraint firstAttribute="width" constant="80" id="XOA-Ez-cS0"/>
+                    </constraints>
+                    <nil key="textColor"/>
+                    <fontDescription key="fontDescription" type="system" pointSize="14"/>
+                    <textInputTraits key="textInputTraits" keyboardType="numberPad" returnKeyType="go"/>
+                </textField>
+                <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="roundedRect" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="wt1-3W-cgA">
+                    <rect key="frame" x="69.5" y="477.5" width="181" height="39"/>
+                    <fontDescription key="fontDescription" type="boldSystem" pointSize="22"/>
+                    <state key="normal" title="SHOW NUMBERS"/>
+                    <connections>
+                        <action selector="showButtonClick:" destination="-1" eventType="touchUpInside" id="XO4-my-Fvd"/>
+                    </connections>
+                </button>
+                <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" textAlignment="natural" lineBreakMode="tailTruncation" numberOfLines="8" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="DRs-Cu-OFQ">
+                    <rect key="frame" x="25" y="265" width="285" height="142.5"/>
+                    <string key="text">Even if you plan to port (transfer) a number from another device or landline, please get a new number for temporary use. Number porting can take a few days. After successful porting, your new number will be replaced by the ported number.</string>
+                    <fontDescription key="fontDescription" type="system" pointSize="17"/>
+                    <nil key="textColor"/>
+                    <nil key="highlightedColor"/>
+                </label>
+                <activityIndicatorView hidden="YES" opaque="NO" contentMode="scaleToFill" horizontalHuggingPriority="750" verticalHuggingPriority="750" hidesWhenStopped="YES" style="whiteLarge" translatesAutoresizingMaskIntoConstraints="NO" id="Uk1-NH-oZw">
+                    <rect key="frame" x="141.5" y="432.5" width="37" height="37"/>
+                    <color key="color" red="1" green="0.0" blue="0.0" alpha="1" colorSpace="calibratedRGB"/>
+                </activityIndicatorView>
+            </subviews>
+            <color key="backgroundColor" red="1" green="1" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+            <constraints>
+                <constraint firstItem="Uk1-NH-oZw" firstAttribute="top" secondItem="DRs-Cu-OFQ" secondAttribute="bottom" constant="25" id="0nN-ZH-vnm"/>
+                <constraint firstItem="E2I-Uk-Fhs" firstAttribute="centerY" secondItem="6N2-4T-33U" secondAttribute="centerY" id="1CV-wc-1cB"/>
+                <constraint firstItem="DRs-Cu-OFQ" firstAttribute="leading" secondItem="Q5M-cg-NOt" secondAttribute="leading" constant="25" id="4f3-fc-fr3"/>
+                <constraint firstItem="HkS-D6-wma" firstAttribute="top" secondItem="Q5M-cg-NOt" secondAttribute="top" constant="27" id="AlG-gf-JB8"/>
+                <constraint firstItem="Obg-oH-5rT" firstAttribute="leading" secondItem="Q5M-cg-NOt" secondAttribute="leading" constant="45" id="FR0-0i-E6X"/>
+                <constraint firstItem="Uk1-NH-oZw" firstAttribute="centerX" secondItem="i5M-Pr-FkT" secondAttribute="centerX" id="KKZ-JM-CwO"/>
+                <constraint firstItem="wt1-3W-cgA" firstAttribute="top" secondItem="DRs-Cu-OFQ" secondAttribute="bottom" constant="70" id="Ll6-cp-dnM"/>
+                <constraint firstAttribute="trailing" secondItem="HkS-D6-wma" secondAttribute="trailing" constant="50" id="M8Y-vr-P4z"/>
+                <constraint firstItem="HkS-D6-wma" firstAttribute="centerY" secondItem="Obg-oH-5rT" secondAttribute="centerY" id="Q2M-LQ-1uw"/>
+                <constraint firstItem="Obg-oH-5rT" firstAttribute="top" secondItem="Q5M-cg-NOt" secondAttribute="top" constant="30" id="ZOC-Ex-TQF"/>
+                <constraint firstItem="6N2-4T-33U" firstAttribute="leading" secondItem="Obg-oH-5rT" secondAttribute="leading" id="dph-Gj-Uvs"/>
+                <constraint firstItem="Q5M-cg-NOt" firstAttribute="trailing" secondItem="DRs-Cu-OFQ" secondAttribute="trailing" constant="10" id="ono-GQ-ubj"/>
+                <constraint firstItem="6N2-4T-33U" firstAttribute="top" secondItem="Obg-oH-5rT" secondAttribute="bottom" constant="25" id="owM-mR-ZNV"/>
+                <constraint firstItem="DRs-Cu-OFQ" firstAttribute="top" secondItem="6N2-4T-33U" secondAttribute="bottom" constant="15" id="uFH-JM-PV5"/>
+                <constraint firstItem="wt1-3W-cgA" firstAttribute="centerX" secondItem="i5M-Pr-FkT" secondAttribute="centerX" id="ulz-MT-h29"/>
+                <constraint firstItem="E2I-Uk-Fhs" firstAttribute="leading" secondItem="6N2-4T-33U" secondAttribute="trailing" constant="20" id="v5h-qj-llF"/>
+                <constraint firstItem="HkS-D6-wma" firstAttribute="leading" secondItem="Obg-oH-5rT" secondAttribute="trailing" constant="30" id="zTY-h5-GuR"/>
+            </constraints>
+            <viewLayoutGuide key="safeArea" id="Q5M-cg-NOt"/>
+        </view>
+    </objects>
+    <resources>
+        <image name="LauncherIcon_default.png" width="76" height="76"/>
+    </resources>
+</document>

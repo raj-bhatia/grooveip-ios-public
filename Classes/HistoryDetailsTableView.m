@@ -34,10 +34,10 @@
 		const bctbx_list_t *logs = linphone_core_get_call_logs(LC);
 		while (logs != NULL) {
 			LinphoneCallLog *log = (LinphoneCallLog *)logs->data;
-			LinphoneAddress *thisRemAddr = linphone_call_log_get_remote_address(log);
+			LinphoneAddress *thisRemAddr = (LinphoneAddress *) linphone_call_log_get_remote_address(log);
 			const char *logUsername = linphone_address_get_username(thisRemAddr);
 			LOGD(@"loadDataForAddress: Peer Username %s, Log Username %s", peerUsername, logUsername);
-			if (linphone_address_weak_equal(thisRemAddr, peer)) {
+			if (0 == strcmp(peerUsername, logUsername)) {
 				[callLogs addObject:[NSValue valueWithPointer:log]];
 			}
 			logs = bctbx_list_next(logs);

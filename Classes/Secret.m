@@ -21,7 +21,7 @@
 #import <CommonCrypto/CommonDigest.h>
 #import "Secret.h"
 
-@implementation Secret : NSObject 
+@implementation Secret : NSObject
 
 + (NSString *) getHash_Login : (NSString *) email
 					password : (NSString *) password
@@ -93,6 +93,34 @@
 					  epochTime : (long) epochTime
 {
 	return @"GetMedia Hash";
+}
+
++ (NSString *) getHash_OutgoingCall : (NSString *) userId
+							  token : (NSString *) token
+					   calledNumber : (NSString *) calledNumber
+						  epochTime : (long) epochTime
+{
+	return @"OutgoingCall Hash";
+}
+
++ (NSString *) getHash_Verify : (NSString *) phoneNumber
+					  string1 : (NSString *) string1
+					  string2 : (NSString *) string2
+					epochTime : (long) epochTime
+{
+	return @"Verify Hash";
+}
+
++ (NSString *) getHash_Register : (NSString *) email
+					   password : (NSString *) password
+					deviceToken : (NSString *) deviceToken
+					serviceType : (NSString *) serviceType
+			   verificationCode : (NSString *) verificationCode
+				   mobileNumber : (NSString *) mobileNumber
+						  delta : (int) delta
+					  epochTime : (long) epochTime
+{
+	return @"Register Hash";
 }
 
 @end

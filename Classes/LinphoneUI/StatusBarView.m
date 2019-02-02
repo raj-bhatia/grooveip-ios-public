@@ -137,13 +137,14 @@
 		(linphone_content_get_buffer(content) == NULL)) {
 		return;
 	}
-	const char *body = linphone_content_get_buffer(content);
+	const uint8_t *bodyTmp = linphone_content_get_buffer(content);
+	const char *body = (const char *)bodyTmp;
 	if ((body = strstr(body, "voice-message: ")) == NULL) {
 		LOGW(@"Received new NOTIFY from voice mail but could not find 'voice-message' in BODY. Ignoring it.");
 		return;
 	}
 
-	sscanf(body, "voice-message: %d", &messagesUnreadCount);
+	sscanf((const char *)body, "voice-message: %d", &messagesUnreadCount);
 
 	LOGI(@"Received new NOTIFY from voice mail: there is/are now %d message(s) unread", messagesUnreadCount);
 
@@ -203,17 +204,17 @@
 
 		switch (state) {
 			case LinphoneRegistrationOk:
-				message = NSLocalizedString(@"Registered", nil);
+				message = NSLocalizedString(@"Active", nil);
 				break;
 			case LinphoneRegistrationNone:
 			case LinphoneRegistrationCleared:
-				message = NSLocalizedString(@"Not registered", nil);
+				message = NSLocalizedString(@"Disconnected from network", nil);
 				break;
 			case LinphoneRegistrationFailed:
-				message = NSLocalizedString(@"Registration failed", nil);
+				message = NSLocalizedString(@"Network connection failed", nil);
 				break;
 			case LinphoneRegistrationProgress:
-				message = NSLocalizedString(@"Registration in progress", nil);
+				message = NSLocalizedString(@"Trying network connection", nil);
 				break;
 			default:
 				break;

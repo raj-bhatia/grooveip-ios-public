@@ -70,7 +70,7 @@ static UICompositeViewDescription *compositeDescription = nil;
 
 - (void)viewWillAppear:(BOOL)animated {
 	[super viewWillAppear:animated];
-
+	_waitView.hidden = YES;
 	[self update];
 
 	[NSNotificationCenter.defaultCenter addObserver:self
@@ -97,7 +97,17 @@ static UICompositeViewDescription *compositeDescription = nil;
 #pragma mark - Event Functions
 
 - (void)coreUpdateEvent:(NSNotification *)notif {
-	[self update];
+	@try {
+		[self update];
+	}
+	@catch (NSException *exception) {
+		if ([exception.name isEqualToString:@"LinphoneCoreException"]) {
+			LOGE(@"Core already destroyed");
+			return;
+		}
+		LOGE(@"Uncaught exception : %@", exception.description);
+		abort();
+	}
 }
 
 - (void) deviceOrientationDidChange:(NSNotification*) notif {
@@ -132,13 +142,12 @@ static UICompositeViewDescription *compositeDescription = nil;
 	}
 	_emptyLabel.hidden = YES;
 
-	LinphoneAddress *addr = linphone_call_log_get_remote_address(callLog);
+	const LinphoneAddress *addr = linphone_call_log_get_remote_address(callLog);
 	_addContactButton.hidden = ([FastAddressBook getContactWithAddress:addr] != nil);
 	[_avatarImage setImage:[FastAddressBook imageForAddress:addr] bordered:NO withRoundedRadius:YES];
 #if 0	// Changed Linphone code - Display the phone number, not SIP URI. Also, if no contact is found, display the phone number just once.
-	[ContactDisplay setDisplayNameLabel:_contactLabel forAddress:addr];
+	[ContactDisplay setDisplayNameLabel:_contactLabel forAddress:addr withAddressLabel:_addressLabel];
 	char *addrURI = linphone_address_as_string_uri_only(addr);
-	_addressLabel.text = [NSString stringWithUTF8String:addrURI];
 	ms_free(addrURI);
 #else
 	BOOL foundContact = [ContactDisplay setDisplayNameLabel:_contactLabel forAddress:addr];
@@ -163,7 +172,7 @@ static UICompositeViewDescription *compositeDescription = nil;
 }
 
 - (IBAction)onContactClick:(id)event {
-	LinphoneAddress *addr = linphone_call_log_get_remote_address(callLog);
+	const LinphoneAddress *addr = linphone_call_log_get_remote_address(callLog);
 	Contact *contact = [FastAddressBook getContactWithAddress:addr];
 	if (contact) {
 		ContactDetailsView *view = VIEW(ContactDetailsView);
@@ -174,7 +183,7 @@ static UICompositeViewDescription *compositeDescription = nil;
 }
 
 - (IBAction)onAddContactClick:(id)event {
-	LinphoneAddress *addr = linphone_call_log_get_remote_address(callLog);
+	const LinphoneAddress *addr = linphone_call_log_get_remote_address(callLog);
 	char *lAddress = linphone_address_as_string_uri_only(addr);
 	if (lAddress != NULL) {
 		[ContactSelection setAddAddress:[NSString stringWithUTF8String:lAddress]];
@@ -189,18 +198,31 @@ static UICompositeViewDescription *compositeDescription = nil;
 }
 
 - (IBAction)onCallClick:(id)event {
-	LinphoneAddress *addr = linphone_call_log_get_remote_address(callLog);
+#if 0	// Changed Linphone code - Without this change, SIP domain difference (URL vs. IP address) causes call failure
+	const LinphoneAddress *addr = linphone_call_log_get_remote_address(callLog);
+#else
+	NSString *number = _addressLabel.text;
+	if (0 == [number length]) {
+		number = _contactLabel.text;
+	}
+	const LinphoneAddress *addr = [LinphoneUtils normalizeSipOrPhoneAddress:number];
+#endif
 	[LinphoneManager.instance call:addr];
 }
 
 - (IBAction)onChatClick:(id)event {
+#if 0	// Changed Linphone code - Without this change, SIP domain difference (URL vs. IP address) causes creation of duplicate conversation
 	const LinphoneAddress *addr = linphone_call_log_get_remote_address(callLog);
-	if (addr == NULL)
-		return;
-	ChatConversationView *view = VIEW(ChatConversationView);
-	LinphoneChatRoom *room = linphone_core_get_chat_room(LC, addr);
-	[view setChatRoom:room];
-	[PhoneMainView.instance changeCurrentView:view.compositeViewDescription];
+#else
+	TabBarView.inSmsTab = TRUE;
+
+	NSString *number = _addressLabel.text;
+	if (0 == [number length]) {
+		number = _contactLabel.text;
+	}
+	const LinphoneAddress *addr = [LinphoneUtils normalizeSipOrPhoneAddress:number];
+#endif
+	[PhoneMainView.instance getOrCreateOneToOneChatRoom:addr waitView:_waitView];
 }
 
 @end

@@ -30,7 +30,7 @@ set(DEFAULT_VALUE_ENABLE_JPEG ON)
 set(DEFAULT_VALUE_ENABLE_MBEDTLS ON)
 set(DEFAULT_VALUE_ENABLE_MKV ON)
 set(DEFAULT_VALUE_ENABLE_OPUS ON)
-set(DEFAULT_VALUE_ENABLE_SILK ON)
+set(DEFAULT_VALUE_ENABLE_SILK OFF)
 set(DEFAULT_VALUE_ENABLE_SPEEX ON)
 set(DEFAULT_VALUE_ENABLE_G729 ${DEFAULT_VALUE_ENABLE_GPL_THIRD_PARTIES})
 set(DEFAULT_VALUE_ENABLE_G729B_CNG OFF)
@@ -56,11 +56,13 @@ if(NOT LINPHONE_IOS_DEPLOYMENT_TARGET)
 	set(LINPHONE_IOS_DEPLOYMENT_TARGET 8.0)
 endif()
 set(LINPHONE_BUILDER_HOST "${CMAKE_SYSTEM_PROCESSOR}-apple-darwin")
-set(COMMON_FLAGS "-miphoneos-version-min=${LINPHONE_IOS_DEPLOYMENT_TARGET} -DTARGET_OS_IPHONE=1 -D__IOS -fms-extensions")
+set(COMMON_FLAGS "-miphoneos-version-min=${LINPHONE_IOS_DEPLOYMENT_TARGET} -fms-extensions")
 set(LINPHONE_BUILDER_CPPFLAGS "${COMMON_FLAGS}")
 set(LINPHONE_BUILDER_LDFLAGS "${COMMON_FLAGS}")
 set(LINPHONE_BUILDER_PKG_CONFIG_LIBDIR ${CMAKE_INSTALL_PREFIX}/lib/pkgconfig)	# Restrict pkg-config to search in the install directory
 unset(COMMON_FLAGS)
+
+message(STATUS "Xcode version: ${XCODE_VERSION}")
 
 #XCode7 requires Cmake 3.3.20150815 at least
 if(NOT ${XCODE_VERSION} VERSION_LESS 7)
@@ -82,6 +84,16 @@ lcb_builder_linking_type(ffmpeg "--enable-static" "--disable-shared" "--enable-p
 # bctoolbox
 if(NOT ENABLE_STATIC_ONLY)
 	lcb_builder_linking_type(bctoolbox "-DENABLE_STATIC=NO" "-DENABLE_SHARED=YES")
+endif()
+
+#belcard
+if(NOT ENABLE_STATIC_ONLY)
+	lcb_builder_linking_type(belcard "-DENABLE_STATIC=NO" "-DENABLE_SHARED=YES")
+endif()
+
+#belcard
+if(NOT ENABLE_STATIC_ONLY)
+	lcb_builder_linking_type(belr "-DENABLE_STATIC=NO" "-DENABLE_SHARED=YES")
 endif()
 
 # linphone
@@ -132,6 +144,9 @@ endif()
 
 # polarssl
 lcb_builder_linking_type(polarssl "-DUSE_SHARED_POLARSSL_LIBRARY=0")
+
+# soci
+lcb_builder_linking_type(soci "-DSOCI_STATIC=YES" "-DSOCI_SHARED=NO")
 
 # speex
 lcb_builder_cmake_options(speex "-DENABLE_FLOAT_API=NO")

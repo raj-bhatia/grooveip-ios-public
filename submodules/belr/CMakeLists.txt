@@ -21,7 +21,7 @@
 ############################################################################
 
 cmake_minimum_required(VERSION 3.0)
-project(BELR VERSION 0.1.2 LANGUAGES C CXX)
+project(BELR VERSION 0.1.3 LANGUAGES C CXX)
 
 set(BELR_SO_VERSION "1")
 
@@ -29,7 +29,7 @@ option(ENABLE_SHARED "Build shared library." ON)
 option(ENABLE_STATIC "Build static library." ON)
 option(ENABLE_STRICT "Build with strict compile options." YES)
 option(ENABLE_TOOLS "Turn on or off compilation of tools." YES)
-
+option(ENABLE_TESTS "Enable compilation of unit tests." YES)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -41,6 +41,7 @@ endif()
 include(GNUInstallDirs)
 include(CheckSymbolExists)
 include(CMakePushCheckState)
+include(CheckCXXCompilerFlag)
 
 # find_package should be invoked here to check for libraries - however do NOT
 # call include_directories here (see below)
@@ -49,8 +50,10 @@ if(LINPHONE_BUILDER_GROUP_EXTERNAL_SOURCE_PATH_BUILDERS)
 	set(BcToolbox_FIND_COMPONENTS tester)
 	include("${EP_bctoolbox_CONFIG_DIR}/BcToolboxConfig.cmake")
 else()
-	find_package(BcToolbox 0.0.3 REQUIRED)
+	find_package(BcToolbox 0.0.5 REQUIRED OPTIONAL_COMPONENTS tester)
 endif()
+
+set(LINK_FLAGS )
 
 if(UNIX AND NOT APPLE)
 	include(CheckIncludeFiles)
@@ -78,7 +81,7 @@ else()
 	list(APPEND STRICT_OPTIONS_CPP "-Wall" "-Wuninitialized" "-Wno-error=deprecated-declarations")
 	list(APPEND STRICT_OPTIONS_C "-Wdeclaration-after-statement" "-Wstrict-prototypes" "-Wno-error=strict-prototypes")
 	list(APPEND STRICT_OPTIONS_CXX "-std=c++11")
-	if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+	if(CMAKE_C_COMPILER_ID MATCHES "Clang")
 		list(APPEND STRICT_OPTIONS_CPP "-Qunused-arguments" "-Wno-array-bounds")
 	endif()
 	if(APPLE)
@@ -87,6 +90,11 @@ else()
 	endif()
 	if(ENABLE_STRICT)
 		list(APPEND STRICT_OPTIONS_CPP "-Werror" "-Wextra" "-Wno-unused-parameter" "-fno-strict-aliasing")
+
+		CHECK_CXX_COMPILER_FLAG("-Wsuggest-override" SUGGEST_OVERRIDE)
+		if(SUGGEST_OVERRIDE)
+			list(APPEND STRICT_OPTIONS_CPP "-Wsuggest-override -Werror=suggest-override")
+		endif()
 	endif()
 endif()
 if(STRICT_OPTIONS_CPP)
@@ -112,8 +120,16 @@ else()
 	set(EXPORT_TARGETS_NAME "belr")
 endif()
 
+set(BELR_GRAMMARS_DIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/belr/grammars")
+set(BELR_GRAMMARS_RELATIVE_DIR "${CMAKE_INSTALL_DATADIR}/belr/grammars")
+
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config.h)
+
 add_subdirectory(include)
 add_subdirectory(src)
+if(ENABLE_TESTS AND BCTOOLBOX_TESTER_FOUND)
+	add_subdirectory(tester)
+endif()
 if(ENABLE_TOOLS)
 	add_subdirectory(tools)
 endif()
@@ -136,15 +152,4 @@ install(FILES
 	DESTINATION ${ConfigPackageLocation}
 )
 
-
-# CPack settings
-set(CPACK_PACKAGE_NAME "belr")
-set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
-set(CPACK_SOURCE_GENERATOR "TGZ")
-set(CPACK_SOURCE_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}")
-set(CPACK_SOURCE_IGNORE_FILES
-        "^${CMAKE_BINARY_DIR}"
-        "/\\\\..+"
-)
-
-include(CPack)
+add_subdirectory(build)

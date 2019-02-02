@@ -96,9 +96,8 @@ static UICompositeViewDescription *compositeDescription = nil;
 - (void)update {
 	const LinphoneAddress *addr = linphone_call_get_remote_address(_call);
 #if 0	// Changed Linphone code - Display the phone number, not SIP URI. Also, if no contact is found, display the phone number just once.
-	[ContactDisplay setDisplayNameLabel:_nameLabel forAddress:addr];
+	[ContactDisplay setDisplayNameLabel:_nameLabel forAddress:addr withAddressLabel:_addressLabel];
 	char *uri = linphone_address_as_string_uri_only(addr);
-	_addressLabel.text = [NSString stringWithUTF8String:uri];
 	ms_free(uri);
 #else
 	BOOL foundContact = [ContactDisplay setDisplayNameLabel:_nameLabel forAddress:addr];

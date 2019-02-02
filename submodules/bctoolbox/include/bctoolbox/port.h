@@ -36,6 +36,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
+#include <wchar.h>
 
 #ifdef __linux
 #include <stdint.h>
@@ -384,7 +385,15 @@ BCTBX_PUBLIC char *bctbx_dirname(const char *path);
  */
 BCTBX_PUBLIC char *bctbx_basename(const char *path);
 
+/**
+ * Tests if a file with given pathname exists. Return 0 if yes, -1 otherwise.
+**/
 BCTBX_PUBLIC int bctbx_file_exist(const char *pathname);
+
+/**
+ * Tests if a directory with given pathname exists. Return 0 if yes, -1 otherwise.
+**/
+BCTBX_PUBLIC bool_t bctbx_directory_exists(const char *pathname);
 
 /**
  * @brief return a timeSpec structure(sec and nsec) containing current time(WARNING: there is no guarantees it is UTC ).
@@ -455,6 +464,14 @@ BCTBX_PUBLIC int bctbx_addrinfo_to_printable_ip_address(const struct addrinfo *a
 BCTBX_PUBLIC int bctbx_sockaddr_to_ip_address(const struct sockaddr *sa, socklen_t salen, char *ip, size_t ip_size, int *port);
 BCTBX_PUBLIC int bctbx_sockaddr_to_printable_ip_address(struct sockaddr *sa, socklen_t salen, char *printable_ip, size_t printable_ip_size);
 
+/** Sort a list of addrinfo with the following rules:
+ -IPV6 including NAT64.
+ -V4 MAPPED IPV6.
+ -V4.
+**/
+BCTBX_PUBLIC struct addrinfo *bctbx_addrinfo_sort(struct addrinfo *ai);
+	
+
 /**
  * Convert a numeric ip address and port into an addrinfo, whose family will be as specified in the first argument.
  * If AF_INET6 is requested, the returned addrinfo will always be an IPv6 address, possibly V4MAPPED if the
@@ -485,8 +502,7 @@ BCTBX_PUBLIC void bctbx_sockaddr_remove_v4_mapping(const struct sockaddr *v6, st
 BCTBX_PUBLIC void bctbx_sockaddr_remove_nat64_mapping(const struct sockaddr *v6, struct sockaddr *result, socklen_t *result_len);
 
 /**
- * This function will transform any V6 address that can be converted to a V4 address (V4 mapped or NAT64) to a pure V4
- * and write it into result, or will just copy it otherwise.
+ * This function will transform a V4 to V6 mapped address to a pure V4 and write it into result, or will just copy it otherwise.
  * The memory for v6 and result may be the same, in which case processing is done in place or no copy is done.
  * The pointer to result must have sufficient storage, typically a struct sockaddr_storage.
 **/
@@ -650,4 +666,9 @@ BCTBX_PUBLIC uint64_t bctbx_str_to_uint64(const uint8_t input_string[17]);
   #define FORMAT_SIZE_T    "%lu"
 #else
   #define FORMAT_SIZE_T    "%zu"
+#endif
+
+#if defined(__ANDROID__)
+int mblen(const char* s, size_t n);
+int wctomb(char *s, wchar_t wc);
 #endif

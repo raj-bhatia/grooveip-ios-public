@@ -28,19 +28,20 @@ import android.hardware.Camera;
 import android.hardware.Camera.Parameters;
 import android.hardware.Camera.Size;
 import android.os.Build;
- 
+
 @TargetApi(Build.VERSION_CODES.GINGERBREAD)
 public class AndroidVideoApi9JniWrapper {
 	static public int detectCameras(int[] indexes, int[] frontFacing, int[] orientation) {
 		return AndroidVideoApi5JniWrapper.detectCameras(indexes, frontFacing, orientation);
 	}
-	
+
 	/**
 	 * Return the hw-available available resolution best matching the requested one.
 	 * Best matching meaning :
 	 * - try to find the same one
 	 * - try to find one just a little bigger (ex: CIF when asked QVGA)
 	 * - as a fallback the nearest smaller one
+	 * @param cameraId Camera id
 	 * @param requestedW Requested video size width
 	 * @param requestedH Requested video size height
 	 * @return int[width, height] of the chosen resolution, may be null if no
@@ -50,16 +51,33 @@ public class AndroidVideoApi9JniWrapper {
 		Log.d("selectNearestResolutionAvailable: " + cameraId + ", " + requestedW + "x" + requestedH);
 		return AndroidVideoApi5JniWrapper.selectNearestResolutionAvailableForCamera(cameraId, requestedW, requestedH);
 	}
-	
+
 	public static Object startRecording(int cameraId, int width, int height, int fps, int rotation, final long nativePtr) {
 		Log.d("startRecording(" + cameraId + ", " + width + ", " + height + ", " + fps + ", " + rotation + ", " + nativePtr + ")");
 		try {
-		Camera camera = Camera.open(cameraId); 
+		Camera camera = Camera.open(cameraId);
 		Parameters params = camera.getParameters();
+		
 
-		params.setPreviewSize(width, height); 
+		for (String focusMode : params.getSupportedFocusModes()) {
+			if (focusMode.equalsIgnoreCase(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO)) {
+				Log.d("FOCUS_MODE_CONTINUOUS_VIDEO is supported, let's use it");
+				params.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
+				break;
+			}
+		}
+		
+		if (params.isVideoStabilizationSupported()) {
+			Log.d("Video stabilization is supported, let's use it");
+			params.setVideoStabilization(true);
+		}
+
+		params.setPreviewSize(width, height);
 		int[] chosenFps = findClosestEnclosingFpsRange(fps*1000, params.getSupportedPreviewFpsRange());
-		params.setPreviewFpsRange(chosenFps[0], chosenFps[1]);
+		if (chosenFps[0] != chosenFps[1]) {
+			// If both values are the same it will most likely break the auto exposure (https://stackoverflow.com/questions/26967490/android-camera-preview-is-dark/28129248#28129248)
+			params.setPreviewFpsRange(chosenFps[0], chosenFps[1]);
+		}
 		camera.setParameters(params);
 
 		int bufferSize = (width * height * ImageFormat.getBitsPerPixel(params.getPreviewFormat())) / 8;
@@ -87,26 +105,26 @@ public class AndroidVideoApi9JniWrapper {
 		camera.startPreview();
 		AndroidVideoApi5JniWrapper.isRecording = true;
 		Log.d("Returning camera object: " + camera);
-		return camera; 
+		return camera;
 		} catch (Exception exc) {
 			exc.printStackTrace();
 			return null;
 		}
-	} 
-	
+	}
+
 	public static void stopRecording(Object cam) {
 		AndroidVideoApi5JniWrapper.isRecording = false;
 		AndroidVideoApi8JniWrapper.stopRecording(cam);
-	} 
-	
+	}
+
 	public static void setPreviewDisplaySurface(Object cam, Object surf) {
 		AndroidVideoApi5JniWrapper.setPreviewDisplaySurface(cam, surf);
 	}
-	
+
 	private static void setCameraDisplayOrientation(int rotationDegrees, int cameraId, Camera camera) {
 		android.hardware.Camera.CameraInfo info = new android.hardware.Camera.CameraInfo();
 		android.hardware.Camera.getCameraInfo(cameraId, info);
-		
+
 		int result;
 		if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
 			result = (info.orientation + rotationDegrees) % 360;
@@ -114,7 +132,7 @@ public class AndroidVideoApi9JniWrapper {
 		} else { // back-facing
 			result = (info.orientation - rotationDegrees + 360) % 360;
 		}
-		
+
 		Log.w("Camera preview orientation: "+ result);
 		try {
 			camera.setDisplayOrientation(result);
@@ -123,28 +141,26 @@ public class AndroidVideoApi9JniWrapper {
 			exc.printStackTrace();
 		}
 	}
-	
+
 	private static int[] findClosestEnclosingFpsRange(int expectedFps, List<int[]> fpsRanges) {
 		Log.d("Searching for closest fps range from " + expectedFps);
 		if (fpsRanges == null || fpsRanges.size() == 0) {
 			return new int[] { 0, 0 };
 		}
-		
+
 		// init with first element
 		int[] closestRange = fpsRanges.get(0);
-		int measure = Math.abs(closestRange[0] - expectedFps)
-				+ Math.abs(closestRange[1] - expectedFps);
+		int measure = Math.abs(closestRange[0] - expectedFps) + Math.abs(closestRange[1] - expectedFps);
 		for (int[] curRange : fpsRanges) {
 			if (curRange[0] > expectedFps || curRange[1] < expectedFps) continue;
-			int curMeasure = Math.abs(curRange[0] - expectedFps)
-					+ Math.abs(curRange[1] - expectedFps);
-			if (curMeasure < measure) {
-				closestRange=curRange;
+			int curMeasure = Math.abs(curRange[0] - expectedFps) + Math.abs(curRange[1] - expectedFps);
+			if (curMeasure < measure && curRange[0] != curRange[1]) { // If both values are the same it will most likely break the auto exposure (https://stackoverflow.com/questions/26967490/android-camera-preview-is-dark/28129248#28129248)
+				closestRange = curRange;
 				measure = curMeasure;
-				Log.d("a better range has been found: w="+closestRange[0]+",h="+closestRange[1]);
+				Log.d("A better range has been found: w=" + closestRange[0] + ",h=" + closestRange[1]);
 			}
 		}
-		Log.d("The closest fps range is w="+closestRange[0]+",h="+closestRange[1]);
+		Log.d("The closest fps range is w=" + closestRange[0] + ",h=" + closestRange[1]);
 		return closestRange;
 	}
 }

@@ -24,9 +24,10 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #   ifndef MEDIASTREAMER_VERSION
 #   define MEDIASTREAMER_VERSION "unknown"
 #   endif
-#	ifndef GIT_VERSION
-#	define GIT_VERSION "unknown"
-#	endif
+#endif
+
+#ifndef MS2_GIT_VERSION
+#define MS2_GIT_VERSION "unknown"
 #endif
 
 #include "mediastreamer2/msfilter.h"
@@ -171,10 +172,10 @@ void ms_factory_init(MSFactory *obj){
 	debug_log_enabled=getenv("MEDIASTREAMER_DEBUG");
 #endif
 	if (debug_log_enabled!=NULL && (strcmp("1",debug_log_enabled)==0) ){
-		ortp_set_log_level_mask(ORTP_LOG_DOMAIN, ORTP_MESSAGE|ORTP_WARNING|ORTP_ERROR|ORTP_FATAL);
+		bctbx_set_log_level(BCTBX_LOG_DOMAIN, BCTBX_LOG_MESSAGE);
 	}
 
-	ms_message("Mediastreamer2 factory " MEDIASTREAMER_VERSION " (git: " GIT_VERSION ") initialized.");
+	ms_message("Mediastreamer2 factory " MEDIASTREAMER_VERSION " (git: " MS2_GIT_VERSION ") initialized.");
 	/* register builtin MSFilter's */
 	for (i=0;ms_base_filter_descs[i]!=NULL;i++){
 		ms_factory_register_filter(obj,ms_base_filter_descs[i]);
@@ -214,7 +215,7 @@ void ms_factory_init(MSFactory *obj){
 #ifdef __ANDROID__
 	ms_factory_add_platform_tag(obj, "android");
 #endif
-#ifdef TARGET_OS_IPHONE
+#if TARGET_OS_IPHONE
 	ms_factory_add_platform_tag(obj, "ios");
 #endif
 #if defined(__arm__) || defined(_M_ARM)
@@ -224,13 +225,15 @@ void ms_factory_init(MSFactory *obj){
 #endif
 #if defined(__ANDROID__) || (TARGET_OS_IPHONE == 1) || defined(__arm__) || defined(_M_ARM)
 	ms_factory_add_platform_tag(obj, "embedded");
+	obj->echo_canceller_filtername = ms_strdup("MSWebRTCAECM");
 #else
 	ms_factory_add_platform_tag(obj, "desktop");
+	obj->echo_canceller_filtername = ms_strdup("MSWebRTCAEC");
 #endif
 	tags = ms_factory_get_platform_tags_as_string(obj);
 	ms_message("ms_factory_init() done: platform_tags=%s", tags);
 	ms_free(tags);
-	obj->echo_canceller_filtername = ms_strdup("MSWebRTCAECM");
+	
 	obj->image_resources_dir = bctbx_strdup_printf("%s/images", PACKAGE_DATA_DIR);
 }
 
@@ -716,7 +719,10 @@ struct _MSEventQueue *ms_factory_create_event_queue(MSFactory *obj) {
 }
 
 void ms_factory_destroy_event_queue(MSFactory *obj) {
-	if (obj->image_resources_dir) bctbx_free(obj->image_resources_dir);
+	if (obj->image_resources_dir) {
+		bctbx_free(obj->image_resources_dir);
+		obj->image_resources_dir = NULL; //to avoid double free from ms_factory_destroy;
+	}
 	ms_event_queue_destroy(obj->evq);
 	ms_factory_set_event_queue(obj,NULL);
 }
@@ -877,6 +883,14 @@ void ms_factory_set_image_resources_dir(MSFactory *f, const char *path) {
 		f->image_resources_dir = bctbx_strdup(path);
 }
 
+void ms_factory_set_expected_bandwidth(MSFactory *f, int bitrate) {
+	f->expected_video_bandwidth = bitrate;
+}
+
+int ms_factory_get_expected_bandwidth(MSFactory *f) {
+	return f->expected_video_bandwidth;
+}
+
 #ifdef __ANDROID__
 #include "sys/system_properties.h"
 #include <jni.h>
@@ -984,6 +998,7 @@ void ms_factory_destroy(MSFactory *factory) {
 	factory->platform_tags = bctbx_list_free(factory->platform_tags);
 	if (factory->echo_canceller_filtername) ms_free(factory->echo_canceller_filtername);
 	if (factory->plugins_dir) ms_free(factory->plugins_dir);
+	if (factory->image_resources_dir) ms_free(factory->image_resources_dir);
 	ms_free(factory);
 	if (factory == fallback_factory) fallback_factory = NULL;
 }

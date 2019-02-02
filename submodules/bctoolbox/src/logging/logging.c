@@ -56,11 +56,13 @@ typedef struct _bctbx_logger_t {
 	bctbx_list_t *log_domains;
 	bctbx_mutex_t log_stored_messages_mutex;
 	bctbx_mutex_t domains_mutex;
+	bctbx_mutex_t log_mutex;
 } bctbx_logger_t;
 
 struct _bctbx_log_handler_t {
 	BctbxLogHandlerFunc func;
 	BctbxLogHandlerDestroyFunc destroy;
+	char *domain; /*domain this log handler is limited to. NULL for all*/
 	void* user_info;
 };
 
@@ -75,15 +77,22 @@ typedef struct _bctbx_file_log_handler_t {
 static bctbx_logger_t __bctbx_logger = { NULL, BCTBX_LOG_WARNING|BCTBX_LOG_ERROR|BCTBX_LOG_FATAL, 0};
 
 static unsigned int bctbx_init_logger_refcount = 0;
+void bctbx_logv_out_cb(void* user_info, const char *domain, BctbxLogLevel lev, const char *fmt, va_list args);
+
+static void wrapper(void* info,const char *domain, BctbxLogLevel lev, const char *fmt, va_list args) {
+	BctbxLogFunc func = (BctbxLogFunc)info;
+	if (func) func(domain, lev, fmt,  args);
+}
+static bctbx_log_handler_t static_handler;
 
 void bctbx_init_logger(bool_t create){
 	if (bctbx_init_logger_refcount++ > 0) return; /*already initialized*/
-	
+	static_handler.func=wrapper;
+	static_handler.destroy=(BctbxLogHandlerDestroyFunc)bctbx_logv_out_destroy;
+	static_handler.user_info=(void*)bctbx_logv_out;
 	bctbx_mutex_init(&__bctbx_logger.domains_mutex, NULL);
-	if(create) {
-		bctbx_log_handler_t* handler = bctbx_create_log_handler(bctbx_logv_out, bctbx_logv_out_destroy, NULL);
-		bctbx_add_log_handler(handler);
-	}
+	bctbx_mutex_init(&__bctbx_logger.log_mutex, NULL);
+	bctbx_add_log_handler(&static_handler);
 }
 
 void bctbx_log_handlers_free(void) {
@@ -99,6 +108,7 @@ void bctbx_uninit_logger(void){
 	if (--bctbx_init_logger_refcount <= 0) {
 		bctbx_logv_flush();
 		bctbx_mutex_destroy(&__bctbx_logger.domains_mutex);
+		bctbx_mutex_destroy(&__bctbx_logger.log_mutex);
 		bctbx_log_handlers_free();
 		__bctbx_logger.logv_outs = bctbx_list_free(__bctbx_logger.logv_outs);
 		__bctbx_logger.log_domains = bctbx_list_free_with_data(__bctbx_logger.log_domains, (void (*)(void*))bctbx_log_domain_destroy);
@@ -106,22 +116,47 @@ void bctbx_uninit_logger(void){
 }
 
 bctbx_log_handler_t* bctbx_create_log_handler(BctbxLogHandlerFunc func, BctbxLogHandlerDestroyFunc destroy, void* user_info) {
-	bctbx_log_handler_t* handler = (bctbx_log_handler_t*)bctbx_malloc(sizeof(bctbx_log_handler_t));
+	bctbx_log_handler_t* handler = (bctbx_log_handler_t*)bctbx_malloc0(sizeof(bctbx_log_handler_t));
 	handler->func = func;
 	handler->destroy = destroy;
 	handler->user_info = user_info;
 	return handler;
 }
 
+void bctbx_log_handler_set_user_data(bctbx_log_handler_t* log_handler, void* user_data) {
+	log_handler->user_info = user_data;
+}
+void *bctbx_log_handler_get_user_data(const bctbx_log_handler_t* log_handler) {
+	return log_handler->user_info;
+}
+
+void bctbx_log_handler_set_domain(bctbx_log_handler_t * log_handler,const char *domain) {
+	if (log_handler->domain) bctbx_free(log_handler->domain);
+	if (domain) {
+		log_handler->domain = bctbx_strdup(domain);
+	} else {
+		log_handler->domain = NULL ;
+	}
+	
+}
 bctbx_log_handler_t* bctbx_create_file_log_handler(uint64_t max_size, const char* path, const char* name, FILE* f) {
 	bctbx_log_handler_t* handler = (bctbx_log_handler_t*)bctbx_malloc0(sizeof(bctbx_log_handler_t));
-	bctbx_file_log_handler_t* filehandler = (bctbx_file_log_handler_t*)bctbx_malloc(sizeof(bctbx_file_log_handler_t));
+	bctbx_file_log_handler_t* filehandler = (bctbx_file_log_handler_t*)bctbx_malloc0(sizeof(bctbx_file_log_handler_t));
+	char *full_name = bctbx_strdup_printf("%s/%s",
+									path,
+									name);
+	struct stat buf;
+	memset(&buf, 0, sizeof(buf));
 	handler->func=bctbx_logv_file;
 	handler->destroy=bctbx_logv_file_destroy;
 	filehandler->max_size = max_size;
 	// init with actual file size
-	fseek(f, 0L, SEEK_END);
-	filehandler->size = ftell(f);
+	if(!f && stat(full_name, &buf) != 0) {
+		fprintf(stderr,"Error while creating file log handler. \n");
+		return NULL;
+	}
+	bctbx_free(full_name);
+	filehandler->size = buf.st_size;
 	filehandler->path = bctbx_strdup(path);
 	filehandler->name = bctbx_strdup(name);
 	filehandler->file = f;
@@ -134,22 +169,28 @@ bctbx_log_handler_t* bctbx_create_file_log_handler(uint64_t max_size, const char
 *
 **/
 void bctbx_add_log_handler(bctbx_log_handler_t* handler){
-	if (!bctbx_list_find(__bctbx_logger.logv_outs, handler))
+	if (handler && !bctbx_list_find(__bctbx_logger.logv_outs, handler))
 		__bctbx_logger.logv_outs = bctbx_list_append(__bctbx_logger.logv_outs, (void*)handler);
 	/*else, already in*/
 }
 
-static void wrapper(void* info,const char *domain, BctbxLogLevel lev, const char *fmt, va_list args) {
-	BctbxLogFunc func = (BctbxLogFunc)info;
-	func(domain, lev, fmt,  args);
+void bctbx_remove_log_handler(bctbx_log_handler_t* handler){
+	__bctbx_logger.logv_outs = bctbx_list_remove(__bctbx_logger.logv_outs,  handler);
+	handler->destroy(handler);
+	return;
 }
 
+
 void bctbx_set_log_handler(BctbxLogFunc func){
-	static bctbx_log_handler_t handler;
-	handler.func=wrapper;
-	handler.destroy=(BctbxLogHandlerDestroyFunc)bctbx_logv_out_destroy;
-	handler.user_info=(void*)func;
-	bctbx_add_log_handler(&handler);
+	bctbx_set_log_handler_for_domain(func,NULL);
+}
+
+void bctbx_set_log_handler_for_domain(BctbxLogFunc func, const char* domain){
+	if (bctbx_init_logger_refcount == 0) {
+		bctbx_init_logger(TRUE);
+	}
+	static_handler.user_info=(void*)func;
+	bctbx_log_handler_set_domain(&static_handler, domain);
 }
 
 void bctbx_set_log_file(FILE* f){
@@ -182,7 +223,9 @@ static BctoolboxLogDomain * get_log_domain(const char *domain){
 
 static BctoolboxLogDomain *get_log_domain_rw(const char *domain){
 	BctoolboxLogDomain *ret;
-
+	if (bctbx_init_logger_refcount == 0) {
+		bctbx_init_logger(TRUE);
+	}
 	if (domain == NULL) return NULL;
 	ret = get_log_domain(domain);
 	if (ret) return ret;
@@ -304,8 +347,7 @@ char * bctbx_strcat_vprintf(char* dst, const char *fmt, va_list ap){
 	retlen = strlen(ret);
 
 	if ((dst = bctbx_realloc(dst, dstlen+retlen+1)) != NULL){
-		strncat(dst,ret,retlen);
-		dst[dstlen+retlen] = '\0';
+		strcat(dst,ret);
 		bctbx_free(ret);
 		return dst;
 	} else {
@@ -340,6 +382,9 @@ void _bctbx_logv_flush(int dummy, ...) {
 	bctbx_list_t *msglist;
 	va_list empty_va_list;
 	va_start(empty_va_list, dummy);
+	if (bctbx_init_logger_refcount == 0) {
+		bctbx_init_logger(TRUE);
+	}
 	bctbx_mutex_lock(&__bctbx_logger.log_stored_messages_mutex);
 	msglist = __bctbx_logger.log_stored_messages_list;
 	__bctbx_logger.log_stored_messages_list = NULL;
@@ -350,20 +395,24 @@ void _bctbx_logv_flush(int dummy, ...) {
 #ifdef _WIN32
 		while (loggers) {
 			bctbx_log_handler_t* handler = (bctbx_log_handler_t*)loggers->data;
-			va_list cap;
-			va_copy(cap, empty_va_list);
-			handler->func(handler->user_info, l->domain, l->level, l->msg, cap);
-			va_end(cap);
+			if(handler) {
+				va_list cap;
+				va_copy(cap, empty_va_list);
+				handler->func(handler->user_info, l->domain, l->level, l->msg, cap);
+				va_end(cap);
+			}
 			loggers = loggers->next;
 		}
 #else
 		
 		while (loggers) {
 			bctbx_log_handler_t* handler = (bctbx_log_handler_t*)loggers->data;
-			va_list cap;
-			va_copy(cap, empty_va_list);
-			handler->func(handler->user_info, l->domain, l->level, l->msg, cap);
-			va_end(cap);
+			if(handler) {
+				va_list cap;
+				va_copy(cap, empty_va_list);
+				handler->func(handler->user_info, l->domain, l->level, l->msg, cap);
+				va_end(cap);
+			}
 			loggers = loggers->next;
 		}
 		
@@ -381,15 +430,20 @@ void bctbx_logv_flush(void) {
 }
 
 void bctbx_logv(const char *domain, BctbxLogLevel level, const char *fmt, va_list args) {
+	if (bctbx_init_logger_refcount == 0) {
+		bctbx_init_logger(TRUE);
+	}
 	if ((__bctbx_logger.logv_outs != NULL) && bctbx_log_level_enabled(domain, level)) {
 		if (__bctbx_logger.log_thread_id == 0) {
 			bctbx_list_t *loggers = bctbx_list_first_elem(__bctbx_logger.logv_outs);
 			while (loggers) {
 				bctbx_log_handler_t* handler = (bctbx_log_handler_t*)loggers->data;
-				va_list tmp;
-				va_copy(tmp, args);
-				handler->func(handler->user_info, domain, level, fmt, tmp);
-				va_end(tmp);
+				if(handler && (!handler->domain || !domain || strcmp(handler->domain,domain)==0)) {
+					va_list tmp;
+					va_copy(tmp, args);
+					handler->func(handler->user_info, domain, level, fmt, tmp);
+					va_end(tmp);
+				}
 				loggers = loggers->next;
 			}
 		} else if (__bctbx_logger.log_thread_id == bctbx_thread_self()) {
@@ -398,10 +452,12 @@ void bctbx_logv(const char *domain, BctbxLogLevel level, const char *fmt, va_lis
 			loggers = bctbx_list_first_elem(__bctbx_logger.logv_outs);
 			while (loggers) {
 				bctbx_log_handler_t* handler = (bctbx_log_handler_t*)loggers->data;
-				va_list tmp;
-				va_copy(tmp, args);
-				handler->func(handler->user_info, domain, level, fmt, tmp);
-				va_end(tmp);
+				if(handler && (!handler->domain || !domain || strcmp(handler->domain,domain)==0)) {
+					va_list tmp;
+					va_copy(tmp, args);
+					handler->func(handler->user_info, domain, level, fmt, tmp);
+					va_end(tmp);
+				}
 				loggers = loggers->next;
 			}
 		} else {
@@ -421,9 +477,11 @@ void bctbx_logv(const char *domain, BctbxLogLevel level, const char *fmt, va_lis
 	}
 #endif
 }
-
+void bctbx_logv_out( const char *domain, BctbxLogLevel lev, const char *fmt, va_list args){
+	bctbx_logv_out_cb(NULL, domain, lev, fmt, args);
+}
 /*This function does the default formatting and output to file*/
-void bctbx_logv_out(void* user_info, const char *domain, BctbxLogLevel lev, const char *fmt, va_list args){
+void bctbx_logv_out_cb(void* user_info, const char *domain, BctbxLogLevel lev, const char *fmt, va_list args){
 	const char *lname="undef";
 	char *msg;
 	struct timeval tp;
@@ -495,7 +553,7 @@ static int _try_open_log_collection_file(bctbx_file_log_handler_t *filehandler) 
 	struct stat statbuf;
 	char *log_filename;
 
-	log_filename = bctbx_strdup_printf("%s/%s.log",
+	log_filename = bctbx_strdup_printf("%s/%s",
 		filehandler->path,
 		filehandler->name);
 	filehandler->file = fopen(log_filename, "a");
@@ -515,43 +573,54 @@ static int _try_open_log_collection_file(bctbx_file_log_handler_t *filehandler) 
 static void _rotate_log_collection_files(bctbx_file_log_handler_t *filehandler) {
 	char *log_filename;
 	char *log_filename2;
+	char *file_no_extension = bctbx_strdup(filehandler->name);
+	char *extension = strrchr(file_no_extension, '.');
+	char *extension2 = bctbx_strdup(extension);
 	int n = 1;
+	file_no_extension[extension - file_no_extension] = '\0';
 
-	log_filename = bctbx_strdup_printf("%s/%s_1.log",
+	log_filename = bctbx_strdup_printf("%s/%s_1%s",
 		filehandler->path,
-		filehandler->name);
+		file_no_extension,
+		extension2);
 	while(access(log_filename, F_OK) != -1) {
-    // file exists
+		// file exists
 		n++;
-		log_filename = bctbx_strdup_printf("%s/%s_%d.log",
+		log_filename = bctbx_strdup_printf("%s/%s_%d%s",
 		filehandler->path,
-		filehandler->name,
-		n);
+		file_no_extension,
+		n,
+		extension2);
 	}
 
 	while(n > 1) {
-		log_filename = bctbx_strdup_printf("%s/%s_%d.log",
+		log_filename = bctbx_strdup_printf("%s/%s_%d%s",
 		filehandler->path,
-		filehandler->name,
-		n-1);
-		log_filename2 = bctbx_strdup_printf("%s/%s_%d.log",
+		file_no_extension,
+		n-1,
+		extension2);
+		log_filename2 = bctbx_strdup_printf("%s/%s_%d%s",
 		filehandler->path,
-		filehandler->name,
-		n);
+		file_no_extension,
+		n,
+		extension2);
 
 		n--;
 		rename(log_filename, log_filename2);
 	}
 
-	log_filename = bctbx_strdup_printf("%s/%s.log",
+	log_filename = bctbx_strdup_printf("%s/%s",
 	filehandler->path,
 	filehandler->name);
-	log_filename2 = bctbx_strdup_printf("%s/%s_1.log",
+	log_filename2 = bctbx_strdup_printf("%s/%s_1%s",
 	filehandler->path,
-	filehandler->name);
+	file_no_extension,
+	extension2);
 	rename(log_filename, log_filename2);
 	bctbx_free(log_filename);
 	bctbx_free(log_filename2);
+	bctbx_free(extension2);
+	bctbx_free(file_no_extension);
 }
 
 static void _open_log_collection_file(bctbx_file_log_handler_t *filehandler) {
@@ -580,7 +649,14 @@ void bctbx_logv_file(void* user_info, const char *domain, BctbxLogLevel lev, con
 	time_t tt;
 	int ret = -1;
 	bctbx_file_log_handler_t *filehandler = (bctbx_file_log_handler_t *) user_info;
-	FILE *f = filehandler->file;
+	FILE *f;
+	if (bctbx_init_logger_refcount == 0) {
+		bctbx_init_logger(TRUE);
+	}
+	bctbx_mutex_lock(&__bctbx_logger.log_mutex);
+	if (filehandler != NULL){
+		f = filehandler->file;
+	}else f = stdout;
 	bctbx_gettimeofday(&tp,NULL);
 	tt = (time_t)tp.tv_sec;
 
@@ -633,13 +709,14 @@ void bctbx_logv_file(void* user_info, const char *domain, BctbxLogLevel lev, con
 			,1900+lt->tm_year,1+lt->tm_mon,lt->tm_mday,lt->tm_hour,lt->tm_min,lt->tm_sec
 		,(int)(tp.tv_usec/1000), (domain?domain:"bctoolbox"), lname, msg);
 	fflush(f);
-	if (filehandler->max_size > 0 && ret > 0) {
+	if (filehandler && filehandler->max_size > 0 && ret > 0) {
 		filehandler->size += ret;
 		if (filehandler->size > filehandler->max_size) {
 			_close_log_collection_file(filehandler);
 			_open_log_collection_file(filehandler);
 		}
 	}
+	bctbx_mutex_unlock(&__bctbx_logger.log_mutex);
 
 	bctbx_free(msg);
 }

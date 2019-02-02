@@ -18,7 +18,9 @@
  */
 
 #import <MobileCoreServices/UTCoreTypes.h>
-
+#import <AVFoundation/AVCaptureDevice.h>
+#import <AVFoundation/AVFoundation.h>
+#import <Photos/Photos.h>
 #import "ImagePickerView.h"
 #import "PhoneMainView.h"
 
@@ -222,17 +224,43 @@ static UICompositeViewDescription *compositeDescription = nil;
 	  }
 	};
 
-	DTActionSheet *sheet = [[DTActionSheet alloc] initWithTitle:NSLocalizedString(@"Select picture source", nil)];
+	DTActionSheet *sheet = [[DTActionSheet alloc] initWithTitle:NSLocalizedString(@"Select the source", nil)];
+#if 0	// Changed Linphone code - Original Linphone code does not work for the Camera case
 	if ([UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypeCamera]) {
 		[sheet addButtonWithTitle:NSLocalizedString(@"Camera", nil)
 							block:^() {
-							  block(UIImagePickerControllerSourceTypeCamera);
+								if([AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo] ==  AVAuthorizationStatusAuthorized ){
+									if([PHPhotoLibrary authorizationStatus] !=  PHAuthorizationStatusDenied ){
+										block(UIImagePickerControllerSourceTypeCamera);
+									}else{
+										[[[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Photo's permission", nil) message:NSLocalizedString(@"Photo not authorized", nil) delegate:nil cancelButtonTitle:nil otherButtonTitles:@"Continue", nil] show];
+									}
+								}else {
+									[[[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Camera's permission", nil) message:NSLocalizedString(@"Camera not authorized", nil) delegate:nil cancelButtonTitle:nil otherButtonTitles:@"Continue", nil] show];
+								}
 							}];
 	}
+#else
+	if ([UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypeCamera]) {
+		[sheet addButtonWithTitle:NSLocalizedString(@"Camera", nil)
+							block:^() {
+								if (([AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo] !=  AVAuthorizationStatusDenied) &&
+									([AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo] !=  AVAuthorizationStatusRestricted)) {
+									block(UIImagePickerControllerSourceTypeCamera);
+								} else {
+									[[[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Camera's permission", nil) message:NSLocalizedString(@"Camera not authorized", nil) delegate:nil cancelButtonTitle:nil otherButtonTitles:@"Continue", nil] show];
+								}
+							}];
+	}
+#endif
 	if ([UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypePhotoLibrary]) {
 		[sheet addButtonWithTitle:NSLocalizedString(@"Photo library", nil)
 							block:^() {
-							  block(UIImagePickerControllerSourceTypePhotoLibrary);
+								if([PHPhotoLibrary authorizationStatus] !=  PHAuthorizationStatusDenied ){
+									 block(UIImagePickerControllerSourceTypePhotoLibrary);
+								}else{
+									[[[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Photo's permission", nil) message:NSLocalizedString(@"Photo not authorized", nil) delegate:nil cancelButtonTitle:nil otherButtonTitles:@"Continue", nil] show];
+								}
 							}];
 	}
 	[sheet addCancelButtonWithTitle:NSLocalizedString(@"Cancel", nil) block:nil];

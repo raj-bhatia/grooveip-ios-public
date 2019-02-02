@@ -5,7 +5,7 @@
 
  @author Johan Pascal
 
- @copyright Copyright (C) 2014 Belledonne Communications, Grenoble, France
+ @copyright Copyright (C) 2017 Belledonne Communications, Grenoble, France
  
  This program is free software; you can redistribute it and/or
  modify it under the terms of the GNU General Public License
@@ -76,13 +76,15 @@
  * as it is used to easily sort them from faster(DH2k) to slower(EC52)
  */
 #define ZRTP_KEYAGREEMENT_DH2k	0x41
-#define ZRTP_KEYAGREEMENT_EC25	0x42
-#define ZRTP_KEYAGREEMENT_DH3k	0x43
-#define ZRTP_KEYAGREEMENT_EC38	0x44
-#define ZRTP_KEYAGREEMENT_EC52	0x45
+#define ZRTP_KEYAGREEMENT_X255	0x42
+#define ZRTP_KEYAGREEMENT_EC25	0x43
+#define ZRTP_KEYAGREEMENT_X448	0x44
+#define ZRTP_KEYAGREEMENT_DH3k	0x45
+#define ZRTP_KEYAGREEMENT_EC38	0x46
+#define ZRTP_KEYAGREEMENT_EC52	0x47
 
-#define ZRTP_KEYAGREEMENT_Prsh	0x46
-#define ZRTP_KEYAGREEMENT_Mult	0x47
+#define ZRTP_KEYAGREEMENT_Prsh	0x4e
+#define ZRTP_KEYAGREEMENT_Mult	0x4f
 
 #define ZRTP_SAS_B32			0x51
 #define ZRTP_SAS_B256			0x52
@@ -115,6 +117,7 @@ typedef struct bzrtpSrtpSecrets_struct  {
 	uint8_t keyAgreementAlgo; /**< The key agreement algo selected during ZRTP negotiation */
 	uint8_t sasAlgo; /**< The SAS rendering algo selected during ZRTP negotiation */
 	uint8_t cacheMismatch; /**< Flag set to 1 in case of ZRTP cache mismatch, may occurs only on first channel(the one computing SAS) */
+	uint8_t auxSecretMismatch; /**< Flag set to 1 in case of auxiliary secret mismatch, may occurs only on first channel(the one computing SAS), in case of mismatch it is just ignored and we can still validate the SAS */
 } bzrtpSrtpSecrets_t;
 
 
@@ -188,6 +191,11 @@ typedef struct bzrtpCallbacks_struct {
  * Store current state, timers, HMAC and encryption keys
 */
 typedef struct bzrtpContext_struct bzrtpContext_t;
+
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /**
  * Create context structure and initialise it
@@ -384,6 +392,20 @@ BZRTP_EXPORT int bzrtp_getSelfHelloHash(bzrtpContext_t *zrtpContext, uint32_t se
  */
 BZRTP_EXPORT int bzrtp_getChannelStatus(bzrtpContext_t *zrtpContext, uint32_t selfSSRC);
 
+
+/**
+ * @brief Set Auxiliary Secret for this channel(shall be used only on primary audio channel)
+ *   The given auxSecret is appended to any aux secret found in ZIDcache
+ *   This function must be called before reception of peerHello packet
+ *
+ * @param[in]		zrtpContext	The ZRTP context we're dealing with
+ * @param[in]		auxSecret	A buffer holding the auxiliary shared secret to use (see RFC 6189 section 4.3)
+ * @param[in]		auxSecretLength	lenght of the previous buffer
+ *
+ * @return 0 on success, error code otherwise
+ */
+BZRTP_EXPORT int bzrtp_setAuxiliarySharedSecret(bzrtpContext_t *zrtpContext, const uint8_t *auxSecret, size_t auxSecretLength);
+
 /*** Cache related functions ***/
 /**
  * @brief Check the given sqlite3 DB and create requested tables if needed
@@ -441,7 +463,7 @@ BZRTP_EXPORT int bzrtp_cache_getZuid(void *dbPointer, const char *selfURI, const
  *
  * @return 0 on succes, error code otherwise
  */
-BZRTP_EXPORT int bzrtp_cache_write(void *dbPointer, int zuid, char *tableName, char **columns, uint8_t **values, size_t *lengths, uint8_t columnsCount);
+BZRTP_EXPORT int bzrtp_cache_write(void *dbPointer, int zuid, const char *tableName, const char **columns, uint8_t **values, size_t *lengths, uint8_t columnsCount);
 
 /**
  * @brief Read data from specified table/columns from cache adressing it by zuid (ZID/URI binding id used in cache)
@@ -459,7 +481,7 @@ BZRTP_EXPORT int bzrtp_cache_write(void *dbPointer, int zuid, char *tableName, c
  *
  * @return 0 on succes, error code otherwise
  */
-BZRTP_EXPORT int bzrtp_cache_read(void *dbPointer, int zuid, char *tableName, char **columns, uint8_t **values, size_t *lengths, uint8_t columnsCount);
+BZRTP_EXPORT int bzrtp_cache_read(void *dbPointer, int zuid, const char *tableName, const char **columns, uint8_t **values, size_t *lengths, uint8_t columnsCount);
 
 /**
  * @brief Perform migration from xml version to sqlite3 version of cache
@@ -487,5 +509,9 @@ BZRTP_EXPORT int bzrtp_cache_migration(void *cacheXmlPtr, void *cacheSqlite, con
  * @return 0 on succes, error code otherwise
  */
 BZRTP_EXPORT int bzrtp_exportKey(bzrtpContext_t *zrtpContext, char *label, size_t labelLength, uint8_t *derivedKey, size_t *derivedKeyLength);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* ifndef BZRTP_H */

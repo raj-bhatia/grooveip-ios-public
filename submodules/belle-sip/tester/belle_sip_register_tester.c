@@ -46,7 +46,6 @@ belle_sip_request_t* authorized_request;
 belle_sip_listener_callbacks_t listener_callbacks;
 belle_sip_listener_t *listener;
 
-
 static void process_dialog_terminated(void *user_ctx, const belle_sip_dialog_terminated_event_t *event){
 	BELLESIP_UNUSED(user_ctx);
 	BELLESIP_UNUSED(event);
@@ -212,25 +211,57 @@ const char *belle_sip_tester_root_ca =
 "6wwCURQtjr0W4MHfRnXnJK3s9EK0hZNwEGe6nQY1ShjTK3rMUUKhemPR5ruhxSvCNr4TDea9Y355\n"
 "e6cJDUCrat2PisP29owaQgVR1EX1n6diIWgVIEM8med8vSTYqZEXc4g/VhsxOBi0cQ+azcgOno4u\n"
 "G+GMmIPLHzHxREzGBHNJdmAPx/i9F4BrLunMTA5amnkPIAou1Z5jJh5VkpTYghdae9C8x49OhgQ=\n"
-"-----END CERTIFICATE-----\n";
+"-----END CERTIFICprocess_auth_requestedATE-----\n";
 
-static void process_auth_requested(void *user_ctx, belle_sip_auth_event_t *event){
+static void process_auth_requested(void *user_ctx, belle_sip_auth_event_t *event) {
 	BELLESIP_UNUSED(user_ctx);
 	if (belle_sip_auth_event_get_mode(event) == BELLE_SIP_AUTH_MODE_HTTP_DIGEST) {
 		const char *username = belle_sip_auth_event_get_username(event);
 		const char *realm = belle_sip_auth_event_get_realm(event);
 		belle_sip_message("process_auth_requested requested for [%s@%s]"
-				,username?username:""
-				,realm?realm:"");
-		belle_sip_auth_event_set_passwd(event,"secret");
+		                  , username ? username : ""
+		                  , realm ? realm : "");
+		belle_sip_auth_event_set_passwd(event, "secret");
 	} else if (belle_sip_auth_event_get_mode(event) == BELLE_SIP_AUTH_MODE_TLS) {
 		const char *distinguished_name = NULL;
-		belle_sip_certificates_chain_t* cert = belle_sip_certificates_chain_parse(belle_sip_tester_client_cert,strlen(belle_sip_tester_client_cert),BELLE_SIP_CERTIFICATE_RAW_FORMAT_PEM);
-		belle_sip_signing_key_t* key = belle_sip_signing_key_parse(belle_sip_tester_private_key,strlen(belle_sip_tester_private_key),belle_sip_tester_private_key_passwd);
-		belle_sip_auth_event_set_client_certificates_chain(event,cert);
-		belle_sip_auth_event_set_signing_key(event,key);
+		belle_sip_certificates_chain_t *cert = belle_sip_certificates_chain_parse(belle_sip_tester_client_cert, strlen(belle_sip_tester_client_cert), BELLE_SIP_CERTIFICATE_RAW_FORMAT_PEM);
+		belle_sip_signing_key_t *key = belle_sip_signing_key_parse(belle_sip_tester_private_key, strlen(belle_sip_tester_private_key), belle_sip_tester_private_key_passwd);
+		belle_sip_auth_event_set_client_certificates_chain(event, cert);
+		belle_sip_auth_event_set_signing_key(event, key);
 		distinguished_name = belle_sip_auth_event_get_distinguished_name(event);
-		belle_sip_message("process_auth_requested requested for  DN[%s]",distinguished_name?distinguished_name:"");
+		belle_sip_message("process_auth_requested requested for  DN[%s]", distinguished_name ? distinguished_name : "");
+
+	} else {
+		belle_sip_error("Unexpected auth mode");
+	}
+}
+
+static void process_auth_requested_for_algorithm(void *user_ctx, belle_sip_auth_event_t *event) {
+	const char **client;
+	client = (const char **) user_ctx; //*client is algorithm of client, *(client+1) is password haché
+	if (*client == NULL)
+		*client = "MD5";
+	if (belle_sip_auth_event_get_mode(event) == BELLE_SIP_AUTH_MODE_HTTP_DIGEST) {
+		const char *username = belle_sip_auth_event_get_username(event);
+		const char *realm = belle_sip_auth_event_get_realm(event);
+		belle_sip_message("process_auth_requested requested for [%s@%s]"
+		                  , username ? username : ""
+		                  , realm ? realm : "");
+		/* Default algorithm is MD5 if it's NULL. If algorithm of client = algorithm of server (event->algorithm), set ha1 or passwd. */
+		if (((event->algorithm) && (!strcmp(*client, event->algorithm))) || ((event->algorithm == NULL) && (!strcmp(*client, "MD5")))) {
+			if (*(client + 1))
+				belle_sip_auth_event_set_ha1(event, *(client + 1));
+			else
+				belle_sip_auth_event_set_passwd(event, "secret");
+		}
+	} else if (belle_sip_auth_event_get_mode(event) == BELLE_SIP_AUTH_MODE_TLS) {
+		const char *distinguished_name = NULL;
+		belle_sip_certificates_chain_t *cert = belle_sip_certificates_chain_parse(belle_sip_tester_client_cert, strlen(belle_sip_tester_client_cert), BELLE_SIP_CERTIFICATE_RAW_FORMAT_PEM);
+		belle_sip_signing_key_t *key = belle_sip_signing_key_parse(belle_sip_tester_private_key, strlen(belle_sip_tester_private_key), belle_sip_tester_private_key_passwd);
+		belle_sip_auth_event_set_client_certificates_chain(event, cert);
+		belle_sip_auth_event_set_signing_key(event, key);
+		distinguished_name = belle_sip_auth_event_get_distinguished_name(event);
+		belle_sip_message("process_auth_requested requested for  DN[%s]", distinguished_name ? distinguished_name : "");
 
 	} else {
 		belle_sip_error("Unexpected auth mode");
@@ -239,31 +270,42 @@ static void process_auth_requested(void *user_ctx, belle_sip_auth_event_t *event
 
 int register_before_all(void) {
 	belle_sip_listening_point_t *lp;
-	stack=belle_sip_stack_new(NULL);
-	lp=belle_sip_stack_create_listening_point(stack,"0.0.0.0",7060,"UDP");
-	prov=belle_sip_stack_create_provider(stack,lp);
-
-	lp=belle_sip_stack_create_listening_point(stack,"0.0.0.0",7060,"TCP");
-	belle_sip_provider_add_listening_point(prov,lp);
-	lp=belle_sip_stack_create_listening_point(stack,"0.0.0.0",7061,"TLS");
-	if (lp) {
-		belle_tls_crypto_config_t *crypto_config=belle_tls_crypto_config_new();
+	stack = belle_sip_stack_new(NULL);
+	const char *client[2] = {NULL, NULL};
+	char *default_hosts = NULL;
 	
+	if (!userhostsfile){
+		userhostsfile = default_hosts = bc_tester_res("tester_hosts");
+	}
+		
+	belle_sip_stack_set_dns_user_hosts_file(stack, userhostsfile);
+	if (default_hosts) bc_free(default_hosts);
+
+	lp = belle_sip_stack_create_listening_point(stack, "0.0.0.0", 7060, "UDP");
+	prov = belle_sip_stack_create_provider(stack, lp);
+
+	lp = belle_sip_stack_create_listening_point(stack, "0.0.0.0", 7060, "TCP");
+	belle_sip_provider_add_listening_point(prov, lp);
+	lp = belle_sip_stack_create_listening_point(stack, "0.0.0.0", 7061, "TLS");
+	if (lp) {
+		belle_tls_crypto_config_t *crypto_config = belle_tls_crypto_config_new();
+
 		belle_tls_crypto_config_set_root_ca_data(crypto_config, belle_sip_tester_root_ca);
 		belle_sip_tls_listening_point_set_crypto_config(BELLE_SIP_TLS_LISTENING_POINT(lp), crypto_config);
-		belle_sip_provider_add_listening_point(prov,lp);
+		belle_sip_provider_add_listening_point(prov, lp);
 		belle_sip_object_unref(crypto_config);
 	}
 
-	listener_callbacks.process_dialog_terminated=process_dialog_terminated;
-	listener_callbacks.process_io_error=process_io_error;
-	listener_callbacks.process_request_event=process_request_event;
-	listener_callbacks.process_response_event=process_response_event;
-	listener_callbacks.process_timeout=process_timeout;
-	listener_callbacks.process_transaction_terminated=process_transaction_terminated;
-	listener_callbacks.process_auth_requested=process_auth_requested;
-	listener_callbacks.listener_destroyed=NULL;
-	listener=belle_sip_listener_create_from_callbacks(&listener_callbacks,NULL);
+	listener_callbacks.process_dialog_terminated = process_dialog_terminated;
+	listener_callbacks.process_io_error = process_io_error;
+	listener_callbacks.process_request_event = process_request_event;
+	listener_callbacks.process_response_event = process_response_event;
+	listener_callbacks.process_timeout = process_timeout;
+	listener_callbacks.process_transaction_terminated = process_transaction_terminated;
+	listener_callbacks.process_auth_requested = process_auth_requested_for_algorithm;
+	listener_callbacks.listener_destroyed = NULL;
+
+	listener = belle_sip_listener_create_from_callbacks(&listener_callbacks, (void *)client);
 	return 0;
 }
 
@@ -652,6 +694,37 @@ static void test_register_client_authenticated(void) {
 	if (reg) belle_sip_object_unref(reg);
 }
 
+static void test_register_client_bad_ciphersuites(void) {
+	/* If there is no mbedtls, this test will do nothing. */
+	if(bctbx_ssl_get_implementation_type()==BCTBX_MBEDTLS) {
+		belle_sip_request_t *reg;
+		authorized_request=NULL;
+		belle_sip_tls_listening_point_t *s = BELLE_SIP_TLS_LISTENING_POINT(belle_sip_provider_get_listening_point(prov, "tls"));
+		belle_tls_crypto_config_t *crypto_config = belle_sip_tls_listening_point_get_crypto_config(s);
+		
+		belle_sip_listening_point_clean_channels((belle_sip_listening_point_t*)s);
+		
+		void *config_ref = crypto_config->ssl_config;
+		int ciphersuites[2] = {bctbx_ssl_get_ciphersuite_id("TLS-RSA-WITH-AES-128-GCM-SHA256"),0};
+
+		bctbx_ssl_config_t *sslcfg = bctbx_ssl_config_new();
+		bctbx_ssl_config_defaults( sslcfg, BCTBX_SSL_IS_CLIENT, BCTBX_SSL_TRANSPORT_STREAM);
+		bctbx_ssl_config_set_authmode(sslcfg, BCTBX_SSL_VERIFY_REQUIRED);
+		bctbx_ssl_config_set_ciphersuites(sslcfg,ciphersuites);
+		crypto_config->ssl_config = bctbx_ssl_config_get_private_config(sslcfg);
+
+		/* This ciphersuite will be rejected by flexisip, so success_expected=0. See tls-ciphers in flexisip. */
+		reg=try_register_user_at_domain(stack, prov, "tls",1,"tester",client_auth_domain,client_auth_outbound_proxy,0);
+		if (authorized_request) {
+			unregister_user(stack,prov,authorized_request,1);
+			belle_sip_object_unref(authorized_request);
+		}
+		if (reg) belle_sip_object_unref(reg);
+		bctbx_ssl_config_free(sslcfg);
+		crypto_config->ssl_config = config_ref;
+	}
+}
+
 static void test_connection_failure(void){
 	belle_sip_request_t *req;
 	io_error_count=0;
@@ -987,6 +1060,7 @@ test_t register_tests[] = {
 	TEST_NO_TAG("Bad TCP request", test_bad_request),
 	TEST_NO_TAG("Authenticate", test_register_authenticate),
 	TEST_NO_TAG("TLS client cert authentication", test_register_client_authenticated),
+	TEST_NO_TAG("TLS client cert bad ciphersuites", test_register_client_bad_ciphersuites),
 	TEST_NO_TAG("Channel inactive", test_register_channel_inactive),
 	TEST_NO_TAG("Channel moving to error test and cleaned", test_channel_moving_to_error_and_cleaned),
 	TEST_NO_TAG("TCP connection failure", test_connection_failure),

@@ -57,6 +57,10 @@ static int bctbx_ssl_sendrecv_callback_return_remap(int32_t ret_code) {
 	}
 }
 
+bctbx_type_implementation_t bctbx_ssl_get_implementation_type(void) {
+	return BCTBX_POLARSSL1_2;
+}
+
 void bctbx_strerror(int32_t error_code, char *buffer, size_t buffer_length) {
 	if (error_code>0) {
 		snprintf(buffer, buffer_length, "%s", "Invalid Error code");
@@ -209,12 +213,17 @@ int32_t bctbx_x509_certificate_get_der(bctbx_x509_certificate_t *cert, unsigned 
 	return 0;
 }
 
-int32_t bctbx_x509_certificate_get_subject_dn(bctbx_x509_certificate_t *cert, char *dn, size_t dn_length) {
+int32_t bctbx_x509_certificate_get_subject_dn(const bctbx_x509_certificate_t *cert, char *dn, size_t dn_length) {
 	if (cert==NULL) {
 		return BCTBX_ERROR_INVALID_CERTIFICATE;
 	}
 
 	return x509parse_dn_gets(dn, dn_length, &(((x509_cert *)cert)->subject));
+}
+
+bctbx_list_t *bctbx_x509_certificate_get_subjects(const bctbx_x509_certificate_t *cert){
+	bctbx_error("bctbx_x509_certificate_get_subjects(): not implemented for polarssl 1.2.");
+	return NULL;
 }
 
 int32_t bctbx_x509_certificate_generate_selfsigned(const char *subject, bctbx_x509_certificate_t *certificate, bctbx_signing_key_t *pkey, char * pem, size_t pem_length) {
@@ -388,14 +397,20 @@ void bctbx_DHMCreatePublic(bctbx_DHMContext_t *context, int (*rngFunction)(void 
 /* compute secret - the ->peer field of context must have been set before calling this function */
 void bctbx_DHMComputeSecret(bctbx_DHMContext_t *context, int (*rngFunction)(void *, uint8_t *, size_t), void *rngContext) {
 	size_t keyLength;
-
+	uint8_t sharedSecretBuffer[384]; /* longest shared secret available in these mode */
+	
 	/* import the peer public value G^Y mod P in the polar ssl context */
 	dhm_read_public((dhm_context *)(context->cryptoModuleData), context->peer, context->primeLength);
 
 	/* compute the secret key */
 	keyLength = context->primeLength; /* undocumented but this value seems to be in/out, so we must set it to the expected key length */
-	context->key = (uint8_t *)malloc(keyLength*sizeof(uint8_t)); /* allocate key buffer */
-	dhm_calc_secret((dhm_context *)(context->cryptoModuleData), context->key, &keyLength);
+	context->key = (uint8_t *)malloc(keyLength*sizeof(uint8_t)); /* allocate and reset the key buffer */
+	memset(context->key,0, keyLength);
+	
+	dhm_calc_secret((dhm_context *)(context->cryptoModuleData), sharedSecretBuffer, &keyLength);
+	/* now copy the resulting secret in the correct place in buffer(result may actually miss some front zero bytes, real length of output is now in keyLength but we want primeLength bytes) */
+	memcpy(context->key+(context->primeLength-keyLength), sharedSecretBuffer, keyLength);
+	memset(sharedSecretBuffer, 0, 384); /* purge secret from temporary buffer */
 }
 
 /* clean DHM context */
@@ -563,6 +578,10 @@ const char *bctbx_ssl_get_ciphersuite(bctbx_ssl_context_t *ssl_ctx){
 	return ssl_get_ciphersuite(&(ssl_ctx->ssl_ctx));
 }
 
+int bctbx_ssl_get_ciphersuite_id(const char *ciphersuite){
+	return BCTBX_ERROR_UNAVAILABLE_FUNCTION;
+}
+
 const char *bctbx_ssl_get_version(bctbx_ssl_context_t *ssl_ctx){
 	return ssl_get_version(&(ssl_ctx->ssl_ctx));
 }
@@ -692,6 +711,15 @@ int32_t bctbx_ssl_config_set_transport (bctbx_ssl_config_t *ssl_config, int tran
 	return 0;
 }
 
+int32_t bctbx_ssl_config_set_ciphersuites(bctbx_ssl_config_t *ssl_config, const int *ciphersuites) {
+		return BCTBX_ERROR_INVALID_SSL_CONFIG;
+}
+
+/* unavailable function */
+void *bctbx_ssl_config_get_private_config(bctbx_ssl_config_t *ssl_config) {
+	return NULL;
+}
+
 int32_t bctbx_ssl_config_set_authmode(bctbx_ssl_config_t *ssl_config, int authmode) {
 	if (ssl_config != NULL) {
 		switch (authmode) {
@@ -806,6 +834,62 @@ int32_t bctbx_ssl_context_setup(bctbx_ssl_context_t *ssl_ctx, bctbx_ssl_config_t
 /***** Hashing                                                           *****/
 /*****************************************************************************/
 /**
+ * @brief HMAC-SHA512 wrapper
+ * @param[in] 	key		HMAC secret key
+ * @param[in] 	keyLength	HMAC key length in bytes
+ * @param[in]	input 		Input data buffer
+ * @param[in]   inputLength	Input data length in bytes
+ * @param[in]	hmacLength	Length of output required in bytes, HMAC output is truncated to the hmacLength left bytes. 48 bytes maximum
+ * @param[out]	output		Output data buffer.
+ *
+ */
+void bctbx_hmacSha512(const uint8_t *key,
+		size_t keyLength,
+		const uint8_t *input,
+		size_t inputLength,
+		uint8_t hmacLength,
+		uint8_t *output)
+{
+	uint8_t hmacOutput[64];
+	sha4_hmac(key, keyLength, input, inputLength, hmacOutput, 0); /* last param to one to select SHA512 and not SHA384 */
+
+	/* check output length, can't be>64 */
+	if (hmacLength>64) {
+		memcpy(output, hmacOutput, 64);
+	} else {
+		memcpy(output, hmacOutput, hmacLength);
+	}
+}
+
+/**
+ * @brief HMAC-SHA384 wrapper
+ * @param[in] 	key		HMAC secret key
+ * @param[in] 	keyLength	HMAC key length in bytes
+ * @param[in]	input 		Input data buffer
+ * @param[in]   inputLength	Input data length in bytes
+ * @param[in]	hmacLength	Length of output required in bytes, HMAC output is truncated to the hmacLength left bytes. 48 bytes maximum
+ * @param[out]	output		Output data buffer.
+ *
+ */
+void bctbx_hmacSha384(const uint8_t *key,
+		size_t keyLength,
+		const uint8_t *input,
+		size_t inputLength,
+		uint8_t hmacLength,
+		uint8_t *output)
+{
+	uint8_t hmacOutput[48];
+	sha4_hmac(key, keyLength, input, inputLength, hmacOutput, 1); /* last param to one to select SHA384 and not SHA512 */
+
+	/* check output length, can't be>48 */
+	if (hmacLength>48) {
+		memcpy(output, hmacOutput, 48);
+	} else {
+		memcpy(output, hmacOutput, hmacLength);
+	}
+}
+
+/**
  * @brief HMAC-SHA256 wrapper
  * @param[in] 	key			HMAC secret key
  * @param[in] 	keyLength	HMAC key length in bytes
@@ -830,6 +914,53 @@ void bctbx_hmacSha256(const uint8_t *key,
 		memcpy(output, hmacOutput, 32);
 	} else {
 		memcpy(output, hmacOutput, hmacLength);
+	}
+}
+/*
+ * @brief SHA512 wrapper
+ * @param[in]	input 		Input data buffer
+ * @param[in]   inputLength	Input data length in bytes
+ * @param[in]	hashLength	Length of output required in bytes, Output is truncated to the hashLength left bytes. 64 bytes maximum
+ * @param[out]	output		Output data buffer.
+ *
+ */
+void bctbx_sha512(const uint8_t *input,
+		size_t inputLength,
+		uint8_t hashLength,
+		uint8_t *output)
+{
+	uint8_t hashOutput[64];
+	sha4(input, inputLength, hashOutput, 0); /* last param to zero to select SHA512 and not SHA384 */
+
+	/* check output length, can't be>64 */
+	if (hashLength>64) {
+		memcpy(output, hashOutput, 64);
+	} else {
+		memcpy(output, hashOutput, hashLength);
+	}
+}
+
+/*
+ * @brief SHA384 wrapper
+ * @param[in]	input 		Input data buffer
+ * @param[in]   inputLength	Input data length in bytes
+ * @param[in]	hashLength	Length of output required in bytes, Output is truncated to the hashLength left bytes. 48 bytes maximum
+ * @param[out]	output		Output data buffer.
+ *
+ */
+void bctbx_sha384(const uint8_t *input,
+		size_t inputLength,
+		uint8_t hashLength,
+		uint8_t *output)
+{
+	uint8_t hashOutput[48];
+	sha4(input, inputLength, hashOutput, 1); /* last param to one to select SHA384 and not SHA512 */
+
+	/* check output length, can't be>48 */
+	if (hashLength>48) {
+		memcpy(output, hashOutput, 48);
+	} else {
+		memcpy(output, hashOutput, hashLength);
 	}
 }
 

@@ -30,6 +30,7 @@
 #include "utils.h"
 #include "rtpsession_priv.h"
 #include "congestiondetector.h"
+#include "videobandwidthestimator.h"
 
 #if (_WIN32_WINNT >= 0x0600)
 #include <delayimp.h>
@@ -262,6 +263,7 @@ rtp_session_init (RtpSession * session, int mode)
 	session->multicast_loopback=RTP_DEFAULT_MULTICAST_LOOPBACK;
 	qinit(&session->rtp.rq);
 	qinit(&session->rtp.tev_rq);
+	qinit(&session->rtp.winrq);
 	qinit(&session->contributing_sources);
 	session->eventqs=NULL;
 
@@ -306,6 +308,15 @@ rtp_session_init (RtpSession * session, int mode)
 		rtp_session_set_transports(session, rtp_tr, rtcp_tr);
 	}
 	session->tev_send_pt = -1; /*check in rtp profile when needed*/
+	
+	ortp_bw_estimator_init(&session->rtp.gs.recv_bw_estimator, 0.95f, 0.01f);
+	ortp_bw_estimator_init(&session->rtcp.gs.recv_bw_estimator, 0.95f, 0.01f);
+	
+#if defined(_WIN32) || defined(_WIN32_WCE)
+	session->rtp.is_win_thread_running = FALSE;
+	ortp_mutex_init(&session->rtp.winthread_lock, NULL);
+	ortp_mutex_init(&session->rtp.winrq_lock, NULL);
+#endif
 }
 
 void rtp_session_enable_congestion_detection(RtpSession *session, bool_t enabled){
@@ -321,6 +332,19 @@ void rtp_session_enable_congestion_detection(RtpSession *session, bool_t enabled
 		}
 	}
 	session->congestion_detector_enabled = enabled;
+}
+
+void rtp_session_enable_video_bandwidth_estimator(RtpSession *session, const OrtpVideoBandwidthEstimatorParams *params) {
+	if (params->enabled) {
+		if (!session->rtp.video_bw_estimator) {
+			session->rtp.video_bw_estimator = ortp_video_bandwidth_estimator_new(session);
+		}
+		if (params->packet_count_min > 0) session->rtp.video_bw_estimator->packet_count_min = params->packet_count_min;
+		if (params->packets_size_max > 0) session->rtp.video_bw_estimator->packets_size_max = params->packets_size_max;
+		if (params->trust_percentage > 0) session->rtp.video_bw_estimator->trust_percentage = params->trust_percentage;
+		if (!session->video_bandwidth_estimator_enabled) ortp_video_bandwidth_estimator_reset(session->rtp.video_bw_estimator);
+	}
+	session->video_bandwidth_estimator_enabled = params->enabled;
 }
 
 void jb_parameters_init(JBParameters *jbp) {
@@ -1541,17 +1565,30 @@ static void ortp_stream_uninit(OrtpStream *os){
 }
 
 void rtp_session_uninit (RtpSession * session)
-{
+{	
 	RtpTransport *rtp_meta_transport = NULL;
 	RtpTransport *rtcp_meta_transport = NULL;
+	
+	/* If rtp async thread is running stop it and wait fot it to finish */
+#if defined(_WIN32) || defined(_WIN32_WCE)
+	if (session->rtp.is_win_thread_running) {
+		session->rtp.is_win_thread_running = FALSE;
+		ortp_thread_join(session->rtp.win_t, NULL);
+	}
+	ortp_mutex_destroy(&session->rtp.winthread_lock);
+	ortp_mutex_destroy(&session->rtp.winrq_lock);
+#endif
+	
 	/* first of all remove the session from the scheduler */
 	if (session->flags & RTP_SESSION_SCHEDULED)
 	{
 		rtp_scheduler_remove_session (session->sched,session);
 	}
+	
 	/*flush all queues */
 	flushq(&session->rtp.rq, FLUSHALL);
 	flushq(&session->rtp.tev_rq, FLUSHALL);
+	flushq(&session->rtp.winrq, FLUSHALL);
 
 	if (session->eventqs!=NULL) o_list_free(session->eventqs);
 	/* close sockets */
@@ -1575,6 +1612,10 @@ void rtp_session_uninit (RtpSession * session)
 	
 	if (session->rtp.congdetect){
 		ortp_congestion_detector_destroy(session->rtp.congdetect);
+	}
+
+	if (session->rtp.video_bw_estimator){
+		ortp_video_bandwidth_estimator_destroy(session->rtp.video_bw_estimator);
 	}
 
 	rtp_session_get_transports(session,&rtp_meta_transport,&rtcp_meta_transport);
@@ -1603,6 +1644,11 @@ void rtp_session_uninit (RtpSession * session)
 		session->rtp.QoSHandle=NULL;
 	}
 #endif
+
+	if (session->rtcp.tmmbr_info.received)
+		freemsg(session->rtcp.tmmbr_info.received);
+	if (session->rtcp.send_algo.fb_packets)
+		freemsg(session->rtcp.send_algo.fb_packets);
 }
 
 /**
@@ -1625,6 +1671,7 @@ void rtp_session_resync(RtpSession *session){
 	rtp_session_unset_flag(session,RTP_SESSION_FIRST_PACKET_DELIVERED);
 	rtp_session_init_jitter_buffer(session);
 	if (session->rtp.congdetect) ortp_congestion_detector_reset(session->rtp.congdetect);
+	if (session->rtp.video_bw_estimator) ortp_video_bandwidth_estimator_reset(session->rtp.video_bw_estimator);
 
 	/* Since multiple streams might share the same session (fixed RTCP port for example),
 	RTCP values might be erroneous (number of packets received is computed
@@ -1846,7 +1893,8 @@ float rtp_session_compute_send_bandwidth(RtpSession *session) {
  * Computation must have been done with rtp_session_compute_recv_bandwidth()
 **/
 float rtp_session_get_recv_bandwidth(RtpSession *session){
-	return session->rtp.gs.download_bw + session->rtcp.gs.download_bw;
+	//return session->rtp.gs.download_bw + session->rtcp.gs.download_bw;
+	return ortp_bw_estimator_get_value(&session->rtp.gs.recv_bw_estimator) + ortp_bw_estimator_get_value(&session->rtcp.gs.recv_bw_estimator);
 }
 
 float rtp_session_get_recv_bandwidth_smooth(RtpSession *session){
@@ -1866,7 +1914,8 @@ float rtp_session_get_send_bandwidth_smooth(RtpSession *session){
 }
 
 float rtp_session_get_rtp_recv_bandwidth(RtpSession *session) {
-	return session->rtp.gs.download_bw;
+	//return session->rtp.gs.download_bw;
+	return ortp_bw_estimator_get_value(&session->rtp.gs.recv_bw_estimator);
 }
 
 float rtp_session_get_rtp_send_bandwidth(RtpSession *session) {
@@ -1874,7 +1923,8 @@ float rtp_session_get_rtp_send_bandwidth(RtpSession *session) {
 }
 
 float rtp_session_get_rtcp_recv_bandwidth(RtpSession *session) {
-	return session->rtcp.gs.download_bw;
+	//return session->rtcp.gs.download_bw;
+	return ortp_bw_estimator_get_value(&session->rtcp.gs.recv_bw_estimator);
 }
 
 float rtp_session_get_rtcp_send_bandwidth(RtpSession *session) {
@@ -2468,4 +2518,16 @@ bool_t ortp_stream_is_ipv6(OrtpStream *os) {
 		return !IN6_IS_ADDR_V4MAPPED(&in6->sin6_addr);
 	}
 	return FALSE;
+}
+
+void rtp_session_reset_recvfrom(RtpSession *session) {
+#if defined(_WIN32) || defined(_WIN32_WCE)
+	ortp_mutex_lock(&session->rtp.winthread_lock);
+	if (session->rtp.is_win_thread_running) {
+		session->rtp.is_win_thread_running = FALSE;
+		ortp_thread_join(session->rtp.win_t, NULL);
+	}
+	ortp_mutex_unlock(&session->rtp.winthread_lock);
+#endif
+	flushq(&session->rtp.winrq, FLUSHALL);
 }

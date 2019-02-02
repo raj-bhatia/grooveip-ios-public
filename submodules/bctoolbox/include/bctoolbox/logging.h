@@ -29,8 +29,17 @@
 #include <bctoolbox/port.h>
 #include "bctoolbox/list.h"
 
+
+/**
+ * The BCTBX_LOG_DOMAIN macro should be defined with a preprocessor directive (ex: -DBCTBX_LOG_DOMAIN="my-component") in every
+ * software entity (application, library, sub-parts of software etc) using the bctoolbox log facility, so that all invocations of the
+ * bctbx_message(), bctbx_warning(), bctbx_error(), bctbx_fatal() outputs their log within the domain title of the software part there are compiled in.
+ * It SHALL not be defined in any public header, otherwise it will conflict with upper layer using the logging facility for their own domain.
+ * As a special exception, bctoolbox defines the log domain to be "bctbx" if no preprocessor directive defines it.
+ * As a result, bctboolbox owns logs will be output into the "bctbx" domain.
+**/
 #ifndef BCTBX_LOG_DOMAIN
-#define BCTBX_LOG_DOMAIN NULL
+#define BCTBX_LOG_DOMAIN "bctbx"
 #endif
 
 #ifdef __cplusplus
@@ -56,7 +65,7 @@ typedef void (*BctbxLogHandlerDestroyFunc)(bctbx_log_handler_t *handler);
 
 /*
  initialise logging functions, add default log handler for stdout output.
- @param[in] bool_t create : whether or not the initialisation should create a default logger in stdout or not.
+ @param[in] bool_t create : No longer used, always created with a default logger to stdout.
  */
 BCTBX_PUBLIC void bctbx_init_logger(bool_t create);
 
@@ -65,23 +74,23 @@ BCTBX_PUBLIC void bctbx_init_logger(bool_t create);
  */
 BCTBX_PUBLIC void bctbx_uninit_logger(void);
 
-/* 
+/*
  Default functions to free log handlers
  @param[in] bctbx_log_handler_t* handler : the handler to free
 */
 BCTBX_PUBLIC void bctbx_logv_out_destroy(bctbx_log_handler_t *handler);
 BCTBX_PUBLIC void bctbx_logv_file_destroy(bctbx_log_handler_t *handler);
 
-/* 
+/*
  Function to create a log handler
  @param[in] BctbxLogHandlerFunc func : the function to call to handle a new line of log
  @param[in] BctbxLogHandlerDestroyFunc destroy : the function to call to free this handler particuler its user_info field
  @param[in] void* user_info : complementary information to handle the logs if needed
  @return a new bctbx_log_handler_t
 */
-BCTBX_PUBLIC bctbx_log_handler_t* bctbx_create_log_handler(BctbxLogHandlerFunc func, BctbxLogHandlerDestroyFunc destroy, void* user_info);
+BCTBX_PUBLIC bctbx_log_handler_t* bctbx_create_log_handler(BctbxLogHandlerFunc func, BctbxLogHandlerDestroyFunc destroy, void* user_data);
 
-/* 
+/*
  Function to create a file log handler
  @param[in] uint64_t max_size : the maximum size of the log file before rotating to a new one (if 0 then no rotation)
  @param[in] const char* path : the path where to put the log files
@@ -90,13 +99,23 @@ BCTBX_PUBLIC bctbx_log_handler_t* bctbx_create_log_handler(BctbxLogHandlerFunc f
  @return a new bctbx_log_handler_t
 */
 BCTBX_PUBLIC bctbx_log_handler_t* bctbx_create_file_log_handler(uint64_t max_size, const char* path, const char* name, FILE* f);
+/* set domain the handler is limited to. NULL for ALL*/
+BCTBX_PUBLIC void bctbx_log_handler_set_domain(bctbx_log_handler_t * log_handler,const char *domain);
+BCTBX_PUBLIC void bctbx_log_handler_set_user_data(bctbx_log_handler_t*, void* user_data);
+BCTBX_PUBLIC void *bctbx_log_handler_get_user_data(const bctbx_log_handler_t* log_handler);
 
 BCTBX_PUBLIC void bctbx_add_log_handler(bctbx_log_handler_t* handler);
-BCTBX_PUBLIC BCTBX_DEPRECATED void bctbx_set_log_handler(BctbxLogFunc func);
-BCTBX_PUBLIC BCTBX_DEPRECATED void bctbx_set_log_file(FILE* f);
+BCTBX_PUBLIC void bctbx_remove_log_handler(bctbx_log_handler_t* handler);
+
+BCTBX_PUBLIC void bctbx_set_log_handler(BctbxLogFunc func);
+/*same as bctbx_set_log_handler but only for a domain. NULL for all*/
+BCTBX_PUBLIC void bctbx_set_log_handler_for_domain(BctbxLogFunc func, const char* domain);
+/*Convenient function that creates a static log handler logging into supplied FILE argument.
+ Despite it is not recommended to use it in libraries, it can be useful for simple test programs.*/
+BCTBX_PUBLIC void bctbx_set_log_file(FILE* f);
 BCTBX_PUBLIC bctbx_list_t* bctbx_get_log_handlers(void);
 
-BCTBX_PUBLIC void bctbx_logv_out(void* user_info, const char *domain, BctbxLogLevel level, const char *fmt, va_list args);
+BCTBX_PUBLIC void bctbx_logv_out(const char *domain, BctbxLogLevel level, const char *fmt, va_list args);
 BCTBX_PUBLIC void bctbx_logv_file(void* user_info, const char *domain, BctbxLogLevel level, const char *fmt, va_list args);
 
 #define bctbx_log_level_enabled(domain, level)	(bctbx_get_log_level_mask(domain) & (level))
@@ -255,14 +274,18 @@ namespace bctoolbox {
 
 #include <ostream>
 
-struct pumpstream : public std::ostringstream {
-	const std::string mDomain;
-	const BctbxLogLevel level;
-	pumpstream(const std::string &domain, BctbxLogLevel l) : mDomain(domain), level(l) {}
-
+class pumpstream : public std::ostringstream {
+public:
+	pumpstream(const char *domain, BctbxLogLevel level) : mDomain(domain ? domain : ""), mLevel(level) {}
 	~pumpstream() {
-		bctbx_log(mDomain.empty()?NULL:mDomain.c_str(), level, "%s", str().c_str());
+		const char *domain = mDomain.empty() ? NULL : mDomain.c_str();
+		if (bctbx_log_level_enabled(domain, mLevel))
+			bctbx_log(domain, mLevel, "%s", str().c_str());
 	}
+
+private:
+	const std::string mDomain;
+	const BctbxLogLevel mLevel;
 };
 
 #if (__GNUC__ == 4 && __GNUC_MINOR__ < 5 && __cplusplus > 199711L)
@@ -272,17 +295,12 @@ template <typename _Tp> inline pumpstream &operator<<(pumpstream &&__os, const _
 }
 #endif
 
-#define BCTBX_SLOG(domain, thelevel) \
-\
-if (bctbx_log_level_enabled((domain), (thelevel))) \
-		pumpstream((domain != NULL ? domain : ""), (thelevel))
+#define BCTBX_SLOG(domain, thelevel) pumpstream(domain, thelevel)
 
-#define BCTBX_SLOGD(DOMAIN) BCTBX_SLOG(DOMAIN, BCTBX_LOG_DEBUG)
-#define BCTBX_SLOGI(DOMAIN) BCTBX_SLOG((DOMAIN), (BCTBX_LOG_MESSAGE))
-#define BCTBX_SLOGW(DOMAIN) BCTBX_SLOG(DOMAIN, BCTBX_LOG_WARNING)
-#define BCTBX_SLOGE(DOMAIN) BCTBX_SLOG(DOMAIN, BCTBX_LOG_ERROR)
-
+#define BCTBX_SLOGD BCTBX_SLOG(BCTBX_LOG_DOMAIN, BCTBX_LOG_DEBUG)
+#define BCTBX_SLOGI BCTBX_SLOG(BCTBX_LOG_DOMAIN, BCTBX_LOG_MESSAGE)
+#define BCTBX_SLOGW BCTBX_SLOG(BCTBX_LOG_DOMAIN, BCTBX_LOG_WARNING)
+#define BCTBX_SLOGE BCTBX_SLOG(BCTBX_LOG_DOMAIN, BCTBX_LOG_ERROR)
 
 #endif
-
 #endif

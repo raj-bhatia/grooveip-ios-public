@@ -20,8 +20,8 @@
 #include <sys/stat.h>
 #include "linphone/core.h"
 #include "linphone/lpconfig.h"
-#include "private.h"
 #include "liblinphone_tester.h"
+#include "tester_utils.h"
 
 static int get_codec_position(const MSList *l, const char *mime_type, int rate){
 	const MSList *elem;
@@ -35,7 +35,7 @@ static int get_codec_position(const MSList *l, const char *mime_type, int rate){
 
 /*check basic things about codecs at startup: order and enablement*/
 static void start_with_no_config(void){
-	LinphoneCore *lc=linphone_factory_create_core(linphone_factory_get(), NULL, NULL, NULL);
+	LinphoneCore *lc=linphone_factory_create_core_2(linphone_factory_get(), NULL, NULL, NULL, NULL, system_context);
 	const MSList *codecs=linphone_core_get_audio_codecs(lc);
 	int opus_codec_pos;
 	int speex_codec_pos=get_codec_position(codecs, "speex", 8000);
@@ -98,6 +98,42 @@ static void simple_call_with_different_codec_mappings(void) {
 		BC_ASSERT_TRUE(wait_for(pauline->lc,marie->lc,&marie->stat.number_of_LinphoneCallStreamsRunning,2));
 		/*payload type numbers shall remain the same*/
 		check_payload_type_numbers(linphone_core_get_current_call(marie->lc), pauline_call, 104);
+	}
+
+	end_call(marie,pauline);
+	linphone_core_manager_destroy(marie);
+	linphone_core_manager_destroy(pauline);
+}
+
+static void simple_call_with_fmtps(void){
+	LinphoneCoreManager* marie;
+	LinphoneCoreManager* pauline;
+	LinphoneCall *pauline_call;
+
+	marie = linphone_core_manager_new( "marie_rc");
+	pauline = linphone_core_manager_new( "pauline_tcp_rc");
+
+	disable_all_audio_codecs_except_one(marie->lc,"pcmu",-1);
+	disable_all_audio_codecs_except_one(pauline->lc,"pcmu",-1);
+
+	/*marie set a fantasy fmtp to PCMU*/
+	linphone_payload_type_set_recv_fmtp(linphone_core_get_payload_type(marie->lc, "PCMU", 8000, -1), "parles-plus-fort=1");
+
+	BC_ASSERT_TRUE(call(marie,pauline));
+	pauline_call=linphone_core_get_current_call(pauline->lc);
+	BC_ASSERT_PTR_NOT_NULL(pauline_call);
+	if (pauline_call){
+		LinphonePayloadType *pt = linphone_call_params_get_used_audio_payload_type(linphone_call_get_current_params(pauline_call));
+		BC_ASSERT_PTR_NOT_NULL(pt);
+		if (pt){
+			BC_ASSERT_STRING_EQUAL(linphone_payload_type_get_send_fmtp(pt),"parles-plus-fort=1");
+		}
+		pt = linphone_call_params_get_used_audio_payload_type(linphone_call_get_current_params(linphone_core_get_current_call(marie->lc)));
+		BC_ASSERT_PTR_NOT_NULL(pt);
+		if (pt){
+			ms_message("send_fmtp=%s, recv_fmtp=%s", linphone_payload_type_get_send_fmtp(pt), linphone_payload_type_get_recv_fmtp(pt));
+			BC_ASSERT_STRING_EQUAL(linphone_payload_type_get_recv_fmtp(pt),"parles-plus-fort=1");
+		}
 	}
 
 	end_call(marie,pauline);
@@ -425,7 +461,8 @@ static void check_avpf_features(LinphoneCore *lc, unsigned char expected_feature
 	LinphoneCall *lcall = linphone_core_get_current_call(lc);
 	BC_ASSERT_PTR_NOT_NULL(lcall);
 	if (lcall != NULL) {
-		SalStreamDescription *desc = sal_media_description_find_stream(lcall->resultdesc, SalProtoRtpAvpf, SalVideo);
+		SalMediaDescription *resultDesc = _linphone_call_get_result_desc(lcall);
+		SalStreamDescription *desc = sal_media_description_find_stream(resultDesc, SalProtoRtpAvpf, SalVideo);
 		BC_ASSERT_PTR_NOT_NULL(desc);
 		if (desc != NULL) {
 			BC_ASSERT_PTR_NOT_NULL(desc->payloads);
@@ -445,7 +482,7 @@ static void compatible_avpf_features(void) {
 	bool_t call_ok;
 
 	if (configure_core_for_avpf_and_video(marie->lc) == NULL) goto end;
-	
+
 	pt = configure_core_for_avpf_and_video(pauline->lc);
 
 	BC_ASSERT_TRUE((call_ok=call(marie, pauline)));
@@ -469,7 +506,7 @@ static void incompatible_avpf_features(void) {
 	bool_t call_ok;
 
 	if (configure_core_for_avpf_and_video(marie->lc) == NULL) goto end;
-	
+
 	pt = configure_core_for_avpf_and_video(pauline->lc);
 	pt->avpf.features = PAYLOAD_TYPE_AVPF_NONE;
 
@@ -491,6 +528,7 @@ static test_t offeranswer_tests[] = {
 	TEST_NO_TAG("Start with no config", start_with_no_config),
 	TEST_NO_TAG("Call failed because of codecs", call_failed_because_of_codecs),
 	TEST_NO_TAG("Simple call with different codec mappings", simple_call_with_different_codec_mappings),
+	TEST_NO_TAG("Simple call with fmtps", simple_call_with_fmtps),
 	TEST_NO_TAG("AVP to AVP call", avp_to_avp_call),
 	TEST_NO_TAG("AVP to AVPF call", avp_to_avpf_call),
 	TEST_NO_TAG("AVP to SAVP call", avp_to_savp_call),

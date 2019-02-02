@@ -18,8 +18,11 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
 #include "linphone/core.h"
-#include "private.h"
 
+#include "c-wrapper/c-wrapper.h"
+
+// TODO: From coreapi. Remove me later.
+#include "private.h"
 
 static LinphoneNatPolicy * _linphone_nat_policy_new_with_ref(LinphoneCore *lc, const char *ref) {
 	LinphoneNatPolicy *policy = belle_sip_object_new(LinphoneNatPolicy);
@@ -40,12 +43,12 @@ static void linphone_nat_policy_destroy(LinphoneNatPolicy *policy) {
 	if (policy->stun_server_username) belle_sip_free(policy->stun_server_username);
 	if (policy->stun_addrinfo) bctbx_freeaddrinfo(policy->stun_addrinfo);
 	if (policy->stun_resolver_context) {
-		sal_resolve_cancel(policy->stun_resolver_context);
-		sal_resolver_context_unref(policy->stun_resolver_context);
+		belle_sip_resolver_context_cancel(policy->stun_resolver_context);
+		belle_sip_object_unref(policy->stun_resolver_context);
 	}
 }
 
-static bool_t linphone_nat_policy_stun_server_activated(LinphoneNatPolicy *policy) {
+bool_t linphone_nat_policy_stun_server_activated(LinphoneNatPolicy *policy) {
 	const char *server = linphone_nat_policy_get_stun_server(policy);
 	return (server != NULL) && (server[0] != '\0')
 		&& ((linphone_nat_policy_stun_enabled(policy) == TRUE) || (linphone_nat_policy_turn_enabled(policy) == TRUE));
@@ -72,11 +75,11 @@ static void _linphone_nat_policy_save_to_config(const LinphoneNatPolicy *policy,
 	lp_config_set_string(config, section, "stun_server", policy->stun_server);
 	lp_config_set_string(config, section, "stun_server_username", policy->stun_server_username);
 	if (linphone_nat_policy_upnp_enabled(policy)) {
-		l = bctbx_list_append(l, "upnp");
+		l = bctbx_list_append(l, (void *)"upnp");
 	} else {
-		if (linphone_nat_policy_stun_enabled(policy)) l = bctbx_list_append(l, "stun");
-		if (linphone_nat_policy_turn_enabled(policy)) l = bctbx_list_append(l, "turn");
-		if (linphone_nat_policy_ice_enabled(policy)) l = bctbx_list_append(l, "ice");
+		if (linphone_nat_policy_stun_enabled(policy)) l = bctbx_list_append(l, (void *)"stun");
+		if (linphone_nat_policy_turn_enabled(policy)) l = bctbx_list_append(l, (void *)"turn");
+		if (linphone_nat_policy_ice_enabled(policy)) l = bctbx_list_append(l, (void *)"ice");
 	}
 	lp_config_set_string_list(config, section, "protocols", l);
 	belle_sip_free(section);
@@ -163,12 +166,7 @@ bool_t linphone_nat_policy_upnp_enabled(const LinphoneNatPolicy *policy) {
 void linphone_nat_policy_enable_upnp(LinphoneNatPolicy *policy, bool_t enable) {
 	policy->upnp_enabled = enable;
 	if (enable) {
-#ifdef BUILD_UPNP
-		policy->stun_enabled = policy->turn_enabled = policy->ice_enabled = FALSE;
-		ms_warning("Enabling uPnP NAT policy has disabled any other previously enabled policies");
-#else
-		ms_warning("Cannot enable the uPnP NAT policy because the uPnP support is not compiled in");
-#endif
+		ms_warning("uPnP NAT policy is no longer supported");
 	}
 }
 
@@ -187,6 +185,17 @@ void linphone_nat_policy_set_stun_server(LinphoneNatPolicy *policy, const char *
 	if (new_stun_server != NULL) {
 		policy->stun_server = new_stun_server;
 	}
+	if (policy->stun_addrinfo) {
+		bctbx_freeaddrinfo(policy->stun_addrinfo);
+		policy->stun_addrinfo = NULL;
+	}
+	if (policy->stun_resolver_context){
+		belle_sip_resolver_context_cancel(policy->stun_resolver_context);
+		belle_sip_object_unref(policy->stun_resolver_context);
+		policy->stun_resolver_context = NULL;
+		
+	}
+	linphone_nat_policy_resolve_stun_server(policy);
 }
 
 const char * linphone_nat_policy_get_stun_server_username(const LinphoneNatPolicy *policy) {
@@ -204,7 +213,8 @@ void linphone_nat_policy_set_stun_server_username(LinphoneNatPolicy *policy, con
 	if (new_username != NULL) policy->stun_server_username = new_username;
 }
 
-static void stun_server_resolved(LinphoneNatPolicy *policy, const char *name, struct addrinfo *addrinfo) {
+static void stun_server_resolved(void *data, const char *name, struct addrinfo *addrinfo, uint32_t ttl) {
+	LinphoneNatPolicy *policy = (LinphoneNatPolicy *)data;
 	if (policy->stun_addrinfo) {
 		bctbx_freeaddrinfo(policy->stun_addrinfo);
 		policy->stun_addrinfo = NULL;
@@ -216,7 +226,7 @@ static void stun_server_resolved(LinphoneNatPolicy *policy, const char *name, st
 	}
 	policy->stun_addrinfo = addrinfo;
 	if (policy->stun_resolver_context){
-		sal_resolver_context_unref(policy->stun_resolver_context);
+		belle_sip_object_unref(policy->stun_resolver_context);
 		policy->stun_resolver_context = NULL;
 	}
 }
@@ -233,8 +243,9 @@ void linphone_nat_policy_resolve_stun_server(LinphoneNatPolicy *policy) {
 		if (service != NULL) {
 			int family = AF_INET;
 			if (linphone_core_ipv6_enabled(policy->lc) == TRUE) family = AF_INET6;
-			policy->stun_resolver_context = sal_resolve(policy->lc->sal, service, "udp", host, port, family, (SalResolverCallback)stun_server_resolved, policy);
-			if (policy->stun_resolver_context) sal_resolver_context_ref(policy->stun_resolver_context);
+			ms_message("Starting stun server resolution [%s]", host);
+			policy->stun_resolver_context = policy->lc->sal->resolve(service, "udp", host, port, family, stun_server_resolved, policy);
+			if (policy->stun_resolver_context) belle_sip_object_ref(policy->stun_resolver_context);
 		}
 	}
 }
@@ -255,7 +266,7 @@ const struct addrinfo * linphone_nat_policy_get_stun_server_addrinfo(LinphoneNat
 		int wait_limit = 1000;
 		linphone_nat_policy_resolve_stun_server(policy);
 		while ((policy->stun_addrinfo == NULL) && (policy->stun_resolver_context != NULL) && (wait_ms < wait_limit)) {
-			sal_iterate(policy->lc->sal);
+			policy->lc->sal->iterate();
 			ms_usleep(50000);
 			wait_ms += 50;
 		}
@@ -277,7 +288,7 @@ LinphoneNatPolicy * linphone_config_create_nat_policy_from_section(const Linphon
 		policy = _linphone_nat_policy_new_with_ref(NULL, config_ref);
 	else
 		policy = linphone_nat_policy_new(NULL);
-	
+
 	if (server != NULL) linphone_nat_policy_set_stun_server(policy, server);
 	if (username != NULL) linphone_nat_policy_set_stun_server_username(policy, username);
 	if (l != NULL) {
@@ -301,7 +312,7 @@ LinphoneNatPolicy * linphone_core_create_nat_policy_from_config(LinphoneCore *lc
 	char *section;
 	int index;
 	bool_t finished = FALSE;
-	
+
 	for (index = 0; finished != TRUE; index++) {
 		section = belle_sip_strdup_printf("nat_policy_%i", index);
 		if (lp_config_has_section(config, section)) {
@@ -315,4 +326,8 @@ LinphoneNatPolicy * linphone_core_create_nat_policy_from_config(LinphoneCore *lc
 	belle_sip_free(section);
 	}
 return policy;
+}
+
+LinphoneCore *linphone_nat_policy_get_core(const LinphoneNatPolicy *policy) {
+	return policy->lc;
 }

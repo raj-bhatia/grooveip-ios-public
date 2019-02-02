@@ -2,6 +2,7 @@
 *~
 old
 old?
+*.pc
 
 # Object files
 *.o
@@ -37,11 +38,13 @@ crypto/test/kernel_driver
 crypto/test/rand_gen
 crypto/test/sha1_driver
 crypto/test/stat_driver
+crypto/test/rand_gen_soak
 tables/aes_tables
 test/dtls_srtp_driver
 test/rdbx_driver
 test/replay_driver
 test/roc_driver
+test/rtp_decoder
 test/rtpw
 test/srtp_driver
-config.h
+test/test_srtp

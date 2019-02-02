@@ -20,7 +20,9 @@
 #import <QuartzCore/QuartzCore.h>
 #import <AudioToolbox/AudioServices.h>
 #import "LinphoneAppDelegate.h"
+#import "Log.h"
 #import "PhoneMainView.h"
+#import "WelcomeView.h"
 
 static RootViewManager *rootViewManagerInstance = nil;
 
@@ -127,6 +129,7 @@ static RootViewManager *rootViewManagerInstance = nil;
 	currentView = nil;
 	_currentRoom = NULL;
 	_currentName = NULL;
+	_previousView = nil;
 	inhibitedEvents = [[NSMutableArray alloc] init];
 }
 
@@ -200,11 +203,33 @@ static RootViewManager *rootViewManagerInstance = nil;
 - (void)viewWillDisappear:(BOOL)animated {
 	[super viewWillDisappear:animated];
 	[NSNotificationCenter.defaultCenter removeObserver:self];
+	[NSNotificationCenter.defaultCenter removeObserver:self name:UIDeviceBatteryLevelDidChangeNotification object:nil];
 	[[UIDevice currentDevice] setBatteryMonitoringEnabled:NO];
+}
+
+/* IPHONE X specific : hide the HomeIndcator when not used */
+#define IS_IPHONE (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPhone)
+#define IS_IPHONE_X (IS_IPHONE && [[UIScreen mainScreen] bounds].size.height == 812.0)
+#define IPHONE_STATUSBAR_HEIGHT (IS_IPHONE_X ? 35 : 20)
+
+- (BOOL)isIphoneXDevice{
+	return IS_IPHONE_X;
 }
 
 - (void)viewDidAppear:(BOOL)animated {
 	[super viewDidAppear:animated];
+	if([self isIphoneXDevice]){
+		if(@available(iOS 11.0, *)) {
+			[self childViewControllerForHomeIndicatorAutoHidden];
+			[self prefersHomeIndicatorAutoHidden];
+			[self setNeedsUpdateOfHomeIndicatorAutoHidden];
+		}
+	}
+
+}
+
+- (BOOL)prefersHomeIndicatorAutoHidden{
+	return YES;
 }
 
 - (void)setVolumeHidden:(BOOL)hidden {
@@ -232,6 +257,9 @@ static RootViewManager *rootViewManagerInstance = nil;
 
 - (void)willRotateToInterfaceOrientation:(UIInterfaceOrientation)toInterfaceOrientation
 								duration:(NSTimeInterval)duration {
+	if (toInterfaceOrientation == UIInterfaceOrientationPortraitUpsideDown)
+		return;
+
 	[super willRotateToInterfaceOrientation:toInterfaceOrientation duration:duration];
 	[mainViewController willRotateToInterfaceOrientation:toInterfaceOrientation duration:duration];
 	[self orientationUpdate:toInterfaceOrientation];
@@ -239,6 +267,9 @@ static RootViewManager *rootViewManagerInstance = nil;
 
 - (void)willAnimateRotationToInterfaceOrientation:(UIInterfaceOrientation)toInterfaceOrientation
 										 duration:(NSTimeInterval)duration {
+	if (toInterfaceOrientation == UIInterfaceOrientationPortraitUpsideDown)
+		return;
+
 	[super willAnimateRotationToInterfaceOrientation:toInterfaceOrientation duration:duration];
 	[mainViewController willAnimateRotationToInterfaceOrientation:toInterfaceOrientation duration:duration];
 }
@@ -260,18 +291,19 @@ static RootViewManager *rootViewManagerInstance = nil;
 #pragma mark - Event Functions
 
 - (void)textReceived:(NSNotification *)notif {
-	LinphoneAddress *from = [[notif.userInfo objectForKey:@"from_address"] pointerValue];
+	LinphoneChatMessage *msg = [[notif.userInfo objectForKey:@"message"] pointerValue];
 	NSString *callID = [notif.userInfo objectForKey:@"call-id"];
 	[self updateApplicationBadgeNumber];
-	LinphoneChatRoom *room = from ? linphone_core_get_chat_room(LC, from) : NULL;
 
-	if (from == nil || room == NULL)
+	if (!msg)
+		return;
+
+	if (linphone_chat_message_is_outgoing(msg))
 		return;
 
 	ChatConversationView *view = VIEW(ChatConversationView);
 	// if we already are in the conversation, we should not ring/vibrate
-	if (view.chatRoom && linphone_address_weak_equal(linphone_chat_room_get_peer_address(room),
-													 linphone_chat_room_get_peer_address(view.chatRoom)))
+	if (view.chatRoom && _currentRoom == view.chatRoom)
 		return;
 
 	if ([UIApplication sharedApplication].applicationState != UIApplicationStateActive)
@@ -436,7 +468,7 @@ static RootViewManager *rootViewManagerInstance = nil;
 					objectForKey:[NSString stringWithUTF8String:linphone_call_log_get_call_id(
 																	linphone_call_get_call_log(call))]];
 				if (!uuid) {
-					return;
+					break;
 				}
 				CXSetHeldCallAction *act = [[CXSetHeldCallAction alloc] initWithCallUUID:uuid onHold:NO];
 				CXTransaction *tr = [[CXTransaction alloc] initWithAction:act];
@@ -449,7 +481,8 @@ static RootViewManager *rootViewManagerInstance = nil;
 		case LinphoneCallUpdating:
 			break;
 	}
-	[self updateApplicationBadgeNumber];
+	if (state == LinphoneCallEnd || state == LinphoneCallError || floor(NSFoundationVersionNumber) <= NSFoundationVersionNumber_iOS_9_x_Max)
+		[self updateApplicationBadgeNumber];
 }
 
 #pragma mark -
@@ -485,26 +518,38 @@ static RootViewManager *rootViewManagerInstance = nil;
 - (void)startUp {
 	@try {
 		LinphoneManager *lm = LinphoneManager.instance;
-		if (linphone_core_get_global_state(LC) != LinphoneGlobalOn) {
-			[self changeCurrentView:DialerView.compositeViewDescription];
-		} else if ([LinphoneManager.instance lpConfigBoolForKey:@"enable_first_login_view_preference"] == true) {
-			[PhoneMainView.instance changeCurrentView:FirstLoginView.compositeViewDescription];
-		} else {
-			// always start to dialer when testing
-			// Change to default view
-			const MSList *list = linphone_core_get_proxy_config_list(LC);
-			if (list != NULL || ([lm lpConfigBoolForKey:@"hide_assistant_preference"] == true) || lm.isTesting) {
-				[self changeCurrentView:DialerView.compositeViewDescription];
-			} else {
-				AssistantView *view = VIEW(AssistantView);
-				[PhoneMainView.instance changeCurrentView:view.compositeViewDescription];
-				[view reset];
-			}
-		}
-		[self updateApplicationBadgeNumber]; // Update Badge at startup
-	} @catch (NSException *exception) {
-		// we'll wait until the app transitions correctly
-	}
+                LOGI(@"%s", linphone_global_state_to_string(
+                                linphone_core_get_global_state(LC)));
+                if (linphone_core_get_global_state(LC) != LinphoneGlobalOn) {
+                  [self changeCurrentView:DialerView.compositeViewDescription];
+                } else if ([LinphoneManager.instance
+                               lpConfigBoolForKey:
+                                   @"enable_first_login_view_preference"] ==
+                           true) {
+                  [PhoneMainView.instance
+                      changeCurrentView:WelcomeView
+                                            .compositeViewDescription];
+                } else {
+                  // always start to dialer when testing
+                  // Change to default view
+                  const MSList *list = linphone_core_get_proxy_config_list(LC);
+                  if (list != NULL ||
+                      ([lm lpConfigBoolForKey:@"hide_assistant_preference"] ==
+                       true) ||
+                      lm.isTesting) {
+                    [self
+                        changeCurrentView:DialerView.compositeViewDescription];
+                  } else {
+                    AssistantView *view = VIEW(AssistantView);
+                    [PhoneMainView.instance
+                        changeCurrentView:view.compositeViewDescription];
+                    [view reset];
+                  }
+                }
+                [self updateApplicationBadgeNumber]; // Update Badge at startup
+        } @catch (NSException *exception) {
+          // we'll wait until the app transitions correctly
+        }
 }
 
 - (void)updateApplicationBadgeNumber {
@@ -513,6 +558,8 @@ static RootViewManager *rootViewManagerInstance = nil;
 	count += [LinphoneManager unreadMessageCount];
 	count += linphone_core_get_calls_nb(LC);
 	[[UIApplication sharedApplication] setApplicationIconBadgeNumber:count];
+	TabBarView *view = (TabBarView *)[PhoneMainView.instance.mainViewController getCachedController:NSStringFromClass(TabBarView.class)];
+	[view update:TRUE];
 }
 
 + (CATransition *)getBackwardTransition {
@@ -644,6 +691,7 @@ static RootViewManager *rootViewManagerInstance = nil;
 	PhoneMainView *vc = [[RootViewManager instance] setViewControllerForDescription:view];
 	if (![view equal:vc.currentView] || vc != self) {
 		LOGI(@"Change current view to %@", view.name);
+		[self setPreviousViewName:vc.currentView.name];
 		NSMutableArray *viewStack = [RootViewManager instance].viewDescriptionStack;
 		[viewStack addObject:view];
 		if (animated && transition == nil)
@@ -669,6 +717,19 @@ static RootViewManager *rootViewManagerInstance = nil;
 	}
 	return [self _changeCurrentView:view transition:[PhoneMainView getBackwardTransition] animated:ANIMATED];
 }
+
+- (void) setPreviousViewName:(NSString*)previous{
+	_previousView = previous;
+}
+
+- (NSString*) getPreviousViewName {
+	return _previousView;
+}
+
++ (NSString*) getPreviousViewName {
+	return [self getPreviousViewName];
+}
+
 
 - (UICompositeViewDescription *)firstView {
 	UICompositeViewDescription *view = nil;
@@ -767,7 +828,7 @@ static RootViewManager *rootViewManagerInstance = nil;
 
 	LinphoneCall *call = linphone_core_get_current_call(LC);
 	if (call && linphone_call_params_video_enabled(linphone_call_get_current_params(call))) {
-		LinphoneCallAppData *callData = (__bridge LinphoneCallAppData *)linphone_call_get_user_pointer(call);
+		LinphoneCallAppData *callData = (__bridge LinphoneCallAppData *)linphone_call_get_user_data(call);
 		if (callData != nil) {
 			if (state == UIDeviceBatteryStateUnplugged) {
 				if (level <= 0.2f && !callData->batteryWarningShown) {
@@ -806,6 +867,113 @@ static RootViewManager *rootViewManagerInstance = nil;
 
 - (void)incomingCallDeclined:(LinphoneCall *)call {
 	linphone_call_terminate(call);
+}
+
+#pragma mark - Chat room Functions
+
+- (void)getOrCreateOneToOneChatRoom:(const LinphoneAddress *)remoteAddress waitView:(UIView *)waitView {
+	if (!remoteAddress) {
+		[self changeCurrentView:ChatsListView.compositeViewDescription];
+		return;
+	}
+
+	const LinphoneAddress *local = linphone_proxy_config_get_contact(linphone_core_get_default_proxy_config(LC));
+	LinphoneChatRoom *room = linphone_core_find_one_to_one_chat_room(LC, local, remoteAddress);
+	if (!room) {
+		bctbx_list_t *addresses = bctbx_list_new((void*)remoteAddress);
+		[self createChatRoomWithSubject:LINPHONE_DUMMY_SUBJECT addresses:addresses andWaitView:waitView];
+		bctbx_list_free(addresses);
+		return;
+	}
+
+	[self goToChatRoom:room];
+}
+
+- (void)createChatRoomWithSubject:(const char *)subject addresses:(bctbx_list_t *)addresses andWaitView:(UIView *)waitView {
+	if (!linphone_proxy_config_get_conference_factory_uri(linphone_core_get_default_proxy_config(LC))
+		|| ([[LinphoneManager instance] lpConfigBoolForKey:@"prefer_basic_chat_room" inSection:@"misc"] && bctbx_list_size(addresses) == 1)) {
+		// If there's no factory uri, create a basic chat room
+		if (bctbx_list_size(addresses) != 1) {
+			// Display Error: unsuported group chat
+			UIAlertController *errView =
+			[UIAlertController alertControllerWithTitle:NSLocalizedString(@"Conversation creation error", nil)
+												message:NSLocalizedString(@"Group conversation is not supported.", nil)
+										 preferredStyle:UIAlertControllerStyleAlert];
+
+			UIAlertAction *defaultAction = [UIAlertAction actionWithTitle:@"OK"
+																	style:UIAlertActionStyleDefault
+																  handler:^(UIAlertAction *action) {}];
+			[errView addAction:defaultAction];
+			[self presentViewController:errView animated:YES completion:nil];
+			return;
+		}
+		LinphoneChatRoom *basicRoom = linphone_core_get_chat_room(LC, addresses->data);
+		[self goToChatRoom:basicRoom];
+		return;
+	}
+
+	_waitView = waitView;
+	_waitView.hidden = NO;
+	LinphoneChatRoom *room = linphone_core_create_client_group_chat_room(LC, subject ?: LINPHONE_DUMMY_SUBJECT, bctbx_list_size(addresses) == 1);
+	if (!room) {
+		_waitView.hidden = YES;
+		return;
+	}
+
+	LinphoneChatRoomCbs *cbs = linphone_factory_create_chat_room_cbs(linphone_factory_get());
+	linphone_chat_room_cbs_set_state_changed(cbs, main_view_chat_room_state_changed);
+	linphone_chat_room_add_callbacks(room, cbs);
+
+	linphone_chat_room_add_participants(room, addresses);
+}
+
+- (void)goToChatRoom:(LinphoneChatRoom *)cr {
+	_waitView.hidden = YES;
+	_waitView = NULL;
+	ChatConversationView *view = VIEW(ChatConversationView);
+	if (view.chatRoom && view.chatRoomCbs)
+		linphone_chat_room_remove_callbacks(view.chatRoom, view.chatRoomCbs);
+
+	view.chatRoomCbs = NULL;
+	view.chatRoom = cr;
+	self.currentRoom = view.chatRoom;
+	if (PhoneMainView.instance.currentView == view.compositeViewDescription)
+		[view configureForRoom:FALSE];
+	else
+		[PhoneMainView.instance changeCurrentView:view.compositeViewDescription];
+}
+
+void main_view_chat_room_state_changed(LinphoneChatRoom *cr, LinphoneChatRoomState newState) {
+	PhoneMainView *view = PhoneMainView.instance;
+	switch (newState) {
+		case LinphoneChatRoomStateCreated: {
+			LOGI(@"Chat room [%p] created on server.", cr);
+			linphone_chat_room_remove_callbacks(cr, linphone_chat_room_get_current_callbacks(cr));
+			[view goToChatRoom:cr];
+			if (!IPAD)
+				break;
+
+			if (PhoneMainView.instance.currentView != ChatsListView.compositeViewDescription && PhoneMainView.instance.currentView != ChatConversationView.compositeViewDescription)
+				break;
+
+			ChatsListView *mainView = VIEW(ChatsListView);
+			[mainView.tableController loadData];
+			[mainView.tableController selectFirstRow];
+			break;
+		}
+		case LinphoneChatRoomStateCreationFailed:
+			LOGE(@"Chat room [%p] could not be created on server.", cr);
+			linphone_chat_room_remove_callbacks(cr, linphone_chat_room_get_current_callbacks(cr));
+			view.waitView.hidden = YES;
+			[ChatConversationInfoView displayCreationError];
+			break;
+		case LinphoneChatRoomStateTerminated:
+			LOGI(@"Chat room [%p] has been terminated.", cr);
+			[view goToChatRoom:cr];
+			break;
+		default:
+			break;
+	}
 }
 
 @end

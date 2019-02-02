@@ -840,6 +840,75 @@ mblk_t *copy_ycbcrbiplanar_to_true_yuv_with_rotation(MSYuvBufAllocator *allocato
 	return copy_ycbcrbiplanar_to_true_yuv_with_rotation_and_down_scale_by_2(allocator, y, cbcr, rotation, w, h, y_byte_per_row, cbcr_byte_per_row, uFirstvSecond, FALSE);
 }
 
+mblk_t *copy_yuv_with_rotation(MSYuvBufAllocator *allocator, const uint8_t* y, const uint8_t* u, const uint8_t* v, int rotation, int w, int h, int y_byte_per_row, int u_byte_per_row, int v_byte_per_row) {
+	MSPicture pict;
+	int uv_w=w/2;
+	int uv_h=h/2;
+	mblk_t * yuv_block;
+	
+	yuv_block = ms_yuv_buf_allocator_get(allocator, &pict, w, h);
+	
+	if (rotation % 180 == 0) {
+		int i,j;
+
+		if (rotation == 0) {
+			// plain y copy
+			for(i=0; i<h; i++) {
+				memcpy(&pict.planes[0][i*w], &y[i*y_byte_per_row], w);
+			}
+			// plain u/v copy
+			for (i=0; i<uv_h; i++) {
+				memcpy(&pict.planes[1][i*uv_w], &u[i*u_byte_per_row], uv_w);
+				memcpy(&pict.planes[2][i*uv_w], &v[i*v_byte_per_row], uv_w);
+			}
+		} else {
+			// 180° y rotation
+			for(i=0; i<h; i++) {
+				for(j=0 ; j<w;j++) {
+					pict.planes[0][i*w+j] = y[(h-1-i)*y_byte_per_row+(w-1-j)];
+				}
+			}
+			// 180° u/v rotation
+			for (i=0; i<uv_h; i++) {
+				for(j=0; j<uv_w; j++) {
+					pict.planes[1][i*uv_w+j] = u[(uv_h-1-i)*u_byte_per_row+(uv_w-1-j)];
+					pict.planes[2][i*uv_w+j] = v[(uv_h-1-i)*v_byte_per_row+(uv_w-1-j)];
+				}
+			}
+		}
+	} else {
+		bool_t clockwise = rotation == 90 ? TRUE : FALSE;
+		// Rotate Y/U/V
+#if defined(__arm__)
+		if (hasNeon) {
+			if (clockwise) {
+				rotate_down_scale_plane_neon_clockwise(w,h,y_byte_per_row,(uint8_t*)y,pict.planes[0],FALSE);
+				rotate_down_scale_plane_neon_clockwise(uv_w,uv_h,u_byte_per_row,(uint8_t*)u,pict.planes[1],FALSE);
+				rotate_down_scale_plane_neon_clockwise(uv_w,uv_h,v_byte_per_row,(uint8_t*)v,pict.planes[2],FALSE);
+			} else {
+				rotate_down_scale_plane_neon_anticlockwise(w,h,y_byte_per_row,(uint8_t*)y,pict.planes[0],FALSE);
+				rotate_down_scale_plane_neon_anticlockwise(uv_w,uv_h,u_byte_per_row,(uint8_t*)u,pict.planes[1],FALSE);
+				rotate_down_scale_plane_neon_anticlockwise(uv_w,uv_h,v_byte_per_row,(uint8_t*)v,pict.planes[2],FALSE);
+			}
+		} else
+#endif
+		{
+			uint8_t* dsty = pict.planes[0];
+			uint8_t* srcy = (uint8_t*) y;
+			uint8_t* dstu = pict.planes[1];
+			uint8_t* srcu = (uint8_t*) u;
+			uint8_t* dstv = pict.planes[2];
+			uint8_t* srcv = (uint8_t*) v;
+			
+			rotate_plane_down_scale_by_2(w,h,y_byte_per_row,srcy,dsty,1,clockwise,FALSE);
+			rotate_plane_down_scale_by_2(uv_w,uv_h,u_byte_per_row,srcu,dstu,1,clockwise,FALSE);
+			rotate_plane_down_scale_by_2(uv_w,uv_h,v_byte_per_row,srcv,dstv,1,clockwise,FALSE);
+		}
+	}
+
+	return yuv_block;
+}
+
 void ms_video_init_framerate_controller(MSFrameRateController* ctrl, float fps) {
 	ctrl->start_time = 0;
 	ctrl->th_frame_count = -1;
@@ -968,4 +1037,93 @@ MSVideoConfiguration ms_video_find_best_configuration_for_size(const MSVideoConf
 	}
 	best_vconf.vsize=vsize;
 	return best_vconf;
+}
+
+MSVideoConfiguration ms_video_find_worst_configuration_for_size(const MSVideoConfiguration *vconf_list, MSVideoSize vsize, int cpu_count) {
+	const MSVideoConfiguration *vconf_it = vconf_list;
+	MSVideoConfiguration best_vconf={0};
+	int min_score=INT32_MAX;
+	int ref_pixels=vsize.height*vsize.width;
+
+	/* search for configuration that is first nearest to target video size, then second has the lowest bitrate but the greater fps,
+	 * but any case making sure the the cpu count is sufficient*/
+	while(TRUE) {
+		int pixels=vconf_it->vsize.width*vconf_it->vsize.height;
+		int score=abs(pixels-ref_pixels);
+		if (cpu_count>=vconf_it->mincpu){
+			if (score<min_score){
+				best_vconf=*vconf_it;
+				min_score=score;
+			}else if (score==min_score){
+				if (best_vconf.required_bitrate == vconf_it->required_bitrate && best_vconf.bitrate_limit == vconf_it->bitrate_limit){
+					if (best_vconf.fps<vconf_it->fps) {
+						best_vconf=*vconf_it;
+					}
+				} else {
+					best_vconf=*vconf_it;
+				}
+			}
+		}
+		if (vconf_it->required_bitrate==0) {
+			break;
+		}
+		vconf_it++;
+
+	}
+	best_vconf.vsize=vsize;
+	return best_vconf;
+}
+
+MSVideoConfiguration ms_video_find_best_configuration_for_size_and_bitrate(const MSVideoConfiguration *vconf_list, MSVideoSize vsize, int cpu_count, int bitrate) {
+	const MSVideoConfiguration *vconf_it = vconf_list;
+	MSVideoConfiguration best_vconf={0};
+	MSVideoConfiguration *last_good_vconf = NULL;
+	int min_score=INT32_MAX;
+	int ref_pixels=vsize.height*vsize.width;
+
+	if (bitrate == 0) return ms_video_find_best_configuration_for_size(vconf_list, vsize, cpu_count);
+
+	/* Search for configuration that is first nearest to target video size, then target bitrate and finally has the greater fps,
+	 * but any case making sure the cpu count is sufficient. 
+	 * We suppose that the configuration list is ordered. */
+	while(TRUE) {
+		int pixels=vconf_it->vsize.width*vconf_it->vsize.height;
+		int score=abs(pixels-ref_pixels);
+		if (cpu_count>=vconf_it->mincpu){
+			if (score<min_score) {
+				best_vconf=*vconf_it;
+				min_score=score;
+				
+				if (bitrate <= vconf_it->bitrate_limit && bitrate >= vconf_it->required_bitrate)
+					last_good_vconf=&best_vconf;
+				else
+					last_good_vconf = NULL;
+			} else if (score==min_score) {
+				if (bitrate <= vconf_it->bitrate_limit && bitrate >= vconf_it->required_bitrate) {
+					if (last_good_vconf == NULL || last_good_vconf->fps < vconf_it->fps) {
+						best_vconf=*vconf_it;
+						last_good_vconf=&best_vconf;
+					}
+				} else if (bitrate < vconf_it->required_bitrate) {
+					best_vconf=*vconf_it;
+					last_good_vconf=NULL;
+				}
+			}
+		}
+		if (vconf_it->required_bitrate==0) {
+			break;
+		}
+		vconf_it++;
+	}
+	last_good_vconf = NULL;
+	best_vconf.vsize = vsize;
+
+	ms_message("Best video configuration for %dbits/s: rb=%d, bl=%d, fps=%f, vsize=%dx%d, mincpu=%d", bitrate, best_vconf.required_bitrate, best_vconf.bitrate_limit, best_vconf.fps, best_vconf.vsize.width, best_vconf.vsize.height, best_vconf.mincpu);
+
+	return best_vconf;
+}
+
+bool_t ms_video_configuratons_equal(const MSVideoConfiguration *vconf1, const MSVideoConfiguration *vconf2) {
+	if (vconf1 == NULL || vconf2 == NULL) return 0;
+	return (vconf1->required_bitrate == vconf2->required_bitrate && vconf1->bitrate_limit == vconf2->bitrate_limit && vconf1->fps == vconf2->fps && vconf1->mincpu == vconf2->mincpu);
 }

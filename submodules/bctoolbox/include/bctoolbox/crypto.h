@@ -1,6 +1,6 @@
 /*
 crypto.h
-Copyright (C) 2016  Belledonne Communications SARL
+Copyright (C) 2017  Belledonne Communications SARL
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
@@ -19,13 +19,42 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #ifndef BCTBX_CRYPTO_H
 #define BCTBX_CRYPTO_H
 
-#include <bctoolbox/port.h>
+#include "bctoolbox/port.h"
+#include "bctoolbox/list.h"
 
+/* key agreements settings defines */
+/* Each algo is defined as a bit toggled in a 32 bits integer,
+ * so we can easily ask for all availables ones
+ */
+#define BCTBX_DHM_UNSET		0x00000000
+#define BCTBX_DHM_2048		0x00000001
+#define BCTBX_DHM_3072		0x00000002
+#define BCTBX_ECDH_X25519	0x00000004
+#define BCTBX_ECDH_X448		0x00000008
 
-/* DHM settings defines */
-#define BCTBX_DHM_UNSET	0
-#define BCTBX_DHM_2048	1
-#define BCTBX_DHM_3072	2
+/* EdDSA defines */
+#define BCTBX_EDDSA_UNSET	0
+#define BCTBX_EDDSA_25519	1
+#define BCTBX_EDDSA_448		2
+
+#define BCTBX_VERIFY_SUCCESS	0
+#define BCTBX_VERIFY_FAILED	-1
+
+/* Elliptic Curves Key lengths defines:
+theses are redefines of the values defined in decaf headers made available to bctoolbox library users
+bctoolbox will fail to compile if these values are not in sync with the decaf ones */
+#define BCTBX_ECDH_X25519_PUBLIC_SIZE	32
+#define BCTBX_ECDH_X25519_PRIVATE_SIZE	BCTBX_ECDH_X25519_PUBLIC_SIZE
+#define BCTBX_ECDH_X448_PUBLIC_SIZE	56
+#define BCTBX_ECDH_X448_PRIVATE_SIZE	BCTBX_ECDH_X448_PUBLIC_SIZE
+
+#define BCTBX_EDDSA_25519_PUBLIC_SIZE	32
+#define BCTBX_EDDSA_25519_PRIVATE_SIZE	BCTBX_EDDSA_25519_PUBLIC_SIZE
+#define BCTBX_EDDSA_25519_SIGNATURE_SIZE	(BCTBX_EDDSA_25519_PUBLIC_SIZE + BCTBX_EDDSA_25519_PRIVATE_SIZE)
+#define BCTBX_EDDSA_448_PUBLIC_SIZE	57
+#define BCTBX_EDDSA_448_PRIVATE_SIZE	BCTBX_EDDSA_448_PUBLIC_SIZE
+#define BCTBX_EDDSA_448_SIGNATURE_SIZE	(BCTBX_EDDSA_448_PUBLIC_SIZE + BCTBX_EDDSA_448_PRIVATE_SIZE)
+
 
 /* SSL settings defines */
 #define BCTBX_SSL_UNSET -1
@@ -120,6 +149,11 @@ typedef enum bctbx_srtp_profile {
 	BCTBX_SRTP_NULL_HMAC_SHA1_32
 } bctbx_dtls_srtp_profile_t;
 
+typedef enum bctbx_type_implementation {
+	BCTBX_POLARSSL,
+	BCTBX_POLARSSL1_2,
+	BCTBX_MBEDTLS
+} bctbx_type_implementation_t;
 
 #ifdef __cplusplus
 extern "C"{
@@ -355,7 +389,15 @@ BCTBX_PUBLIC int32_t bctbx_x509_certificate_get_der(bctbx_x509_certificate_t *ce
  *
  * @return The length of the string written (not including the terminated nul byte), or a negative error code
  */
-BCTBX_PUBLIC int32_t bctbx_x509_certificate_get_subject_dn(bctbx_x509_certificate_t *cert, char *dn, size_t dn_length);
+BCTBX_PUBLIC int32_t bctbx_x509_certificate_get_subject_dn(const bctbx_x509_certificate_t *cert, char *dn, size_t dn_length);
+
+/**
+ * @brief Obtain the certificate subjects (all subjectAltName URIS and DNS + subject CN)
+ *
+ * @param[in]		cert		The x509 certificate
+ * @return a list of allocated strings (char*), to be freed with bctbx_free()
+ */
+BCTBX_PUBLIC bctbx_list_t *bctbx_x509_certificate_get_subjects(const bctbx_x509_certificate_t *cert);
 
 /**
  * @brief Generate certificate fingerprint (hash of the DER format certificate) hexadecimal format in a null terminated string
@@ -438,6 +480,7 @@ BCTBX_PUBLIC int32_t bctbx_x509_certificate_unset_flag(uint32_t *flags, uint32_t
 /*****************************************************************************/
 typedef struct bctbx_ssl_context_struct bctbx_ssl_context_t;
 typedef struct bctbx_ssl_config_struct bctbx_ssl_config_t;
+BCTBX_PUBLIC bctbx_type_implementation_t bctbx_ssl_get_implementation_type(void);
 BCTBX_PUBLIC bctbx_ssl_context_t *bctbx_ssl_context_new(void);
 BCTBX_PUBLIC void bctbx_ssl_context_free(bctbx_ssl_context_t *ssl_ctx);
 BCTBX_PUBLIC int32_t bctbx_ssl_context_setup(bctbx_ssl_context_t *ssl_ctx, bctbx_ssl_config_t *ssl_config);
@@ -454,11 +497,13 @@ BCTBX_PUBLIC void bctbx_ssl_set_io_callbacks(bctbx_ssl_context_t *ssl_ctx, void 
 		int(*callback_recv_function)(void *, unsigned char *, size_t)); /* args: callback data, data buffer to be read, size of data buffer */
 BCTBX_PUBLIC const bctbx_x509_certificate_t *bctbx_ssl_get_peer_certificate(bctbx_ssl_context_t *ssl_ctx);
 BCTBX_PUBLIC const char *bctbx_ssl_get_ciphersuite(bctbx_ssl_context_t *ssl_ctx);
+BCTBX_PUBLIC int bctbx_ssl_get_ciphersuite_id(const char* ciphersuite);
 BCTBX_PUBLIC const char *bctbx_ssl_get_version(bctbx_ssl_context_t *ssl_ctx);
-
+	
 BCTBX_PUBLIC bctbx_ssl_config_t *bctbx_ssl_config_new(void);
 BCTBX_PUBLIC int32_t bctbx_ssl_config_set_crypto_library_config(bctbx_ssl_config_t *ssl_config, void *internal_config);
 BCTBX_PUBLIC void bctbx_ssl_config_free(bctbx_ssl_config_t *ssl_config);
+BCTBX_PUBLIC void *bctbx_ssl_config_get_private_config(bctbx_ssl_config_t *ssl_config);
 BCTBX_PUBLIC int32_t bctbx_ssl_config_defaults(bctbx_ssl_config_t *ssl_config, int endpoint, int transport);
 BCTBX_PUBLIC int32_t bctbx_ssl_config_set_endpoint(bctbx_ssl_config_t *ssl_config, int endpoint);
 BCTBX_PUBLIC int32_t bctbx_ssl_config_set_transport (bctbx_ssl_config_t *ssl_config, int transport);
@@ -468,13 +513,24 @@ BCTBX_PUBLIC int32_t bctbx_ssl_config_set_callback_verify(bctbx_ssl_config_t *ss
 BCTBX_PUBLIC int32_t bctbx_ssl_config_set_callback_cli_cert(bctbx_ssl_config_t *ssl_config, int(*callback_function)(void *, bctbx_ssl_context_t *, unsigned char *, size_t), void *callback_data);
 BCTBX_PUBLIC int32_t bctbx_ssl_config_set_ca_chain(bctbx_ssl_config_t *ssl_config, bctbx_x509_certificate_t *ca_chain);
 BCTBX_PUBLIC int32_t bctbx_ssl_config_set_own_cert(bctbx_ssl_config_t *ssl_config, bctbx_x509_certificate_t *cert, bctbx_signing_key_t *key);
-
+BCTBX_PUBLIC int32_t bctbx_ssl_config_set_ciphersuites(bctbx_ssl_config_t *ssl_config,const int *ciphersuites);
+	
 /***** DTLS-SRTP functions *****/
 BCTBX_PUBLIC bctbx_dtls_srtp_profile_t bctbx_ssl_get_dtls_srtp_protection_profile(bctbx_ssl_context_t *ssl_ctx);
 BCTBX_PUBLIC int32_t bctbx_ssl_config_set_dtls_srtp_protection_profiles(bctbx_ssl_config_t *ssl_config, const bctbx_dtls_srtp_profile_t *profiles, size_t profiles_number);
 BCTBX_PUBLIC int32_t bctbx_ssl_get_dtls_srtp_key_material(bctbx_ssl_context_t *ssl_ctx, char *output, size_t *output_length);
 BCTBX_PUBLIC uint8_t bctbx_dtls_srtp_supported(void);
 
+/*****************************************************************************/
+/***** Key exchanges defined algorithms                                  *****/
+/*****************************************************************************/
+/**
+ * @brief Return a 32 bits unsigned integer, each bit set to one matches an
+ * available key agreement algorithm as defined in bctoolbox/include/crypto.h
+ *
+ * @return An unsigned integer of 32 flags matching key agreement algos
+ */
+BCTBX_PUBLIC uint32_t bctbx_key_agreement_algo_list(void);
 
 /*****************************************************************************/
 /***** Diffie-Hellman-Merkle key exchange                                *****/
@@ -541,12 +597,322 @@ BCTBX_PUBLIC void bctbx_DHMComputeSecret(bctbx_DHMContext_t *context, int (*rngF
  */
 BCTBX_PUBLIC void bctbx_DestroyDHMContext(bctbx_DHMContext_t *context);
 
+
+/*****************************************************************************/
+/***** Elliptic Curve Diffie-Hellman-Merkle key exchange                 *****/
+/*****************************************************************************/
+/**
+ *
+ * @brief return TRUE if the Elliptic Curve Cryptography is available
+ */
+BCTBX_PUBLIC int bctbx_crypto_have_ecc(void);
+
+/**
+ * @brief Context for the EC Diffie-Hellman-Merkle key exchange on curve 25519 and 448
+ *	Use RFC7748 for base points values
+ */
+typedef struct bctbx_ECDHContext_struct {
+	uint8_t algo; /**< Algorithm used for the key exchange mapped to an int: BCTBX_ECDH_X25519, BCTBX_ECDH_X448 */
+	uint16_t pointCoordinateLength; /**< length in bytes of the point u-coordinate, can be 32 or 56 */
+	uint8_t *secret; /**< the random secret (scalar) used to compute public key and shared secret */
+	uint8_t secretLength; /**< in bytes, usually the same than pointCoordinateLength */
+	uint8_t *sharedSecret; /**< the key exchanged scalar multiplation of MULT(Self Secret, MULT(Peer Secret, BasePoint)), u-coordinate */
+	uint8_t *selfPublic; /**< this side of the public exchange: MULT(self secret, BasePoint), u-coordinate */
+	uint8_t *peerPublic; /**< the other side of the public exchange: MULT(peer secret, BasePoint), u-coordinate */
+	void *cryptoModuleData; /**< a context needed by the underlying crypto implementation - note if in use, most of the previous buffers could be store in it actually */
+}bctbx_ECDHContext_t;
+
+/**
+ *
+ * @brief Create a context for the ECDH key exchange
+ *
+ * @param[in] ECDHAlgo		The algorithm type(BCTBX_ECDH_X25519 or BCTBX_ECDH_X448)
+ *
+ * @return The initialised context for the ECDH calculation(must then be freed calling the destroyECDHContext function), NULL on error
+ *
+ */
+BCTBX_PUBLIC bctbx_ECDHContext_t *bctbx_CreateECDHContext(const uint8_t ECDHAlgo);
+
+/**
+ *
+ * @brief Generate the private secret scalar and compute the public key MULT(scalar, BasePoint)
+ *
+ * @param[in/out] 	context		ECDH context, will store the public value in ->selfPublic after this call, and secret in ->secret
+ * @param[in] 		rngFunction	pointer to a random number generator used to create the secret
+ * @param[in]		rngContext	pointer to the rng context if neeeded
+ *
+ */
+BCTBX_PUBLIC void bctbx_ECDHCreateKeyPair(bctbx_ECDHContext_t *context, int (*rngFunction)(void *, uint8_t *, size_t), void *rngContext);
+
+/**
+ *
+ * @brief	Set the given secret key in the ECDH context
+ *
+ * @param[in/out]	context		ECDH context, will store the given secret key if length is matching the pre-setted algo for this context
+ * @param[in]		secret		The buffer holding the secret, is duplicated in the ECDH context
+ * @param[in]		secretLength	Length of previous buffer, must match the algo type setted at context creation
+ */
+BCTBX_PUBLIC void bctbx_ECDHSetSecretKey(bctbx_ECDHContext_t *context, const uint8_t *secret, const size_t secretLength);
+
+/**
+ *
+ * @brief	Set the given self public key in the ECDH context
+ *		Warning: no check if it matches the private key value
+ *
+ * @param[in/out]	context			ECDH context, will store the given self public key if length is matching the pre-setted algo for this context
+ * @param[in]		selfPublic		The buffer holding the self public key, is duplicated in the ECDH context
+ * @param[in]		selfPublicLength	Length of previous buffer, must match the algo type setted at context creation
+ */
+BCTBX_PUBLIC void bctbx_ECDHSetSelfPublicKey(bctbx_ECDHContext_t *context, const uint8_t *selfPublic, const size_t selfPublicLength);
+
+/**
+ *
+ * @brief	Set the given peer public key in the ECDH context
+ *
+ * @param[in/out]	context			ECDH context, will store the given peer public key if length is matching the pre-setted algo for this context
+ * @param[in]		peerPublic		The buffer holding the peer public key, is duplicated in the ECDH context
+ * @param[in]		peerPublicLength	Length of previous buffer, must match the algo type setted at context creation
+ */
+BCTBX_PUBLIC void bctbx_ECDHSetPeerPublicKey(bctbx_ECDHContext_t *context, const uint8_t *peerPublic, const size_t peerPublicLength);
+
+/**
+ *
+ * @brief	Derive the public key from the secret setted in context and using preselected algo, following RFC7748
+ *
+ * @param[in/out]	context		The context holding algo setting and secret, used to store public key
+ */
+BCTBX_PUBLIC void bctbx_ECDHDerivePublicKey(bctbx_ECDHContext_t *context);
+
+/**
+ *
+ * @brief Compute the shared secret MULT(secret, peer Public)
+ * ->peerPublic, containing MULT(peerSecret, basePoint) must have been set before this call in context
+ *
+ * @param[in/out] 	context		Read the public values from context, export the key to context->sharedSecret
+ * @param[in]		rngFunction	Pointer to a random number generation function, used for blinding countermeasure, may be NULL
+ * @param[in]		rngContext	Pointer to the RNG function context
+ *
+ */
+BCTBX_PUBLIC void bctbx_ECDHComputeSecret(bctbx_ECDHContext_t *context, int (*rngFunction)(void *, uint8_t *, size_t), void *rngContext);
+
+/**
+ *
+ * @brief Clean ECDH context. Secret and key, if present, are erased from memory(set to 0)
+ *
+ * @param	context	The context to deallocate
+ *
+ */
+BCTBX_PUBLIC void bctbx_DestroyECDHContext(bctbx_ECDHContext_t *context);
+
+/*****************************************************************************/
+/***** EdDSA: signature and verify using Elliptic curves                 *****/
+/*****************************************************************************/
+/**
+ * @brief Context for the EdDSA using curves 25519 and 448
+ */
+typedef struct bctbx_EDDSAContext_struct {
+	uint8_t algo; /**< Algorithm used for the key exchange mapped to an int: BCTBX_EDDSA_25519, BCTBX_EDDSA_448 */
+	uint16_t pointCoordinateLength; /**< length in bytes of a serialised point coordinate, can be 32 or 57 */
+	uint8_t *secretKey; /**< the random secret (scalar) used to compute public key and message signature, is the same length than a serialised point coordinate */
+	uint8_t secretLength; /**< in bytes, usually the same than pointCoordinateLength */
+	uint8_t *publicKey; /**< MULT(HASH(secretKey), BasePoint), serialised coordinate */
+	void *cryptoModuleData; /**< a context needed by the underlying crypto implementation - note if in use, most of the previous buffers could be store in it actually */
+}bctbx_EDDSAContext_t;
+
+/**
+ *
+ * @brief Create a context for the EdDSA sign/verify
+ *
+ * @param[in] EDDSAAlgo		The algorithm type(BCTBX_EDDSA_25519 or BCTBX_EDDSA_448)
+ *
+ * @return The initialised context for the EDDSA calculation(must then be freed calling the destroyEDDSAContext function), NULL on error
+ *
+ */
+BCTBX_PUBLIC bctbx_EDDSAContext_t *bctbx_CreateEDDSAContext(uint8_t EDDSAAlgo);
+
+/**
+ *
+ * @brief Generate the private secret scalar and compute the public MULT(scalar, BasePoint)
+ *
+ * @param[in/out] 	context		EDDSA context, will store the public value in ->publicKey after this call, and secret in ->secretKey
+ * @param[in] 		rngFunction	pointer to a random number generator used to create the secret
+ * @param[in]		rngContext	pointer to the rng context if neeeded
+ *
+ */
+BCTBX_PUBLIC void bctbx_EDDSACreateKeyPair(bctbx_EDDSAContext_t *context, int (*rngFunction)(void *, uint8_t *, size_t), void *rngContext);
+
+/**
+ *
+ * @brief Using the private secret scalar already set in context, compute the public MULT(scalar, BasePoint)
+ *
+ * @param[in/out] 	context		EDDSA context, will store the public value in ->publicKey after this call, already have secret in ->secretKey
+ *
+ */
+BCTBX_PUBLIC void bctbx_EDDSADerivePublicKey(bctbx_EDDSAContext_t *context);
+
+/**
+ *
+ * @brief Clean ECDH context. Secret and key, if present, are erased from memory(set to 0)
+ *
+ * @param	context	The context to deallocate
+ *
+ */
+BCTBX_PUBLIC void bctbx_DestroyEDDSAContext(bctbx_EDDSAContext_t *context);
+
+/**
+ *
+ * @brief Sign the message given using private key and EdDSA algo set in context
+ *
+ * @param[in]		context			EDDSA context storing the algorithm to use(ed448 or ed25519) and the private key to use
+ * @param[in]		message			The message to be signed
+ * @param[in]		messageLength		Length of the message buffer
+ * @param [in]		associatedData		A "context" for this signature of up to 255 bytes.
+ * @param [in]		associatedDataLength	Length of the context.
+ * @param[out]		signature		The signature
+ * @param[in/out]	signatureLength		The size of the signature buffer as input, the size of the actual signature as output
+ *
+ */
+BCTBX_PUBLIC void bctbx_EDDSA_sign(bctbx_EDDSAContext_t *context, const uint8_t *message, const size_t messageLength, const uint8_t *AssociatedData, const size_t associatedDataLength, uint8_t *signature, size_t *signatureLength);
+
+/**
+ *
+ * @brief Set a public key in a EDDSA context to be used to verify messages signature
+ *
+ * @param[in/out]	context		EDDSA context storing the algorithm to use(ed448 or ed25519)
+ * @param[in]		publicKey	The public to store in context
+ * @param[in]		publicKeyLength	The length of previous buffer
+ */
+BCTBX_PUBLIC void bctbx_EDDSA_setPublicKey(bctbx_EDDSAContext_t *context, const uint8_t *publicKey, const size_t publicKeyLength);
+
+/**
+ *
+ * @brief Set a private key in a EDDSA context to be used to sign message
+ *
+ * @param[in/out]	context		EDDSA context storing the algorithm to use(ed448 or ed25519)
+ * @param[in]		secretKey	The secret to store in context
+ * @param[in]		secretKeyLength	The length of previous buffer
+ */
+BCTBX_PUBLIC void bctbx_EDDSA_setSecretKey(bctbx_EDDSAContext_t *context, const uint8_t *secretKey, const size_t secretKeyLength);
+
+/**
+ *
+ * @brief Use the public key set in context to verify the given signature and message
+ *
+ * @param[in/out]	context			EDDSA context storing the algorithm to use(ed448 or ed25519) and public key
+ * @param[in]		message			Message to verify
+ * @param[in]		messageLength		Length of the message buffer
+ * @param [in]		associatedData		A "context" for this signature of up to 255 bytes.
+ * @param [in]		associatedDataLength	Length of the context.
+ * @param[in]		signature		The signature
+ * @param[in]		signatureLength		The size of the signature buffer
+ *
+ * @return BCTBX_VERIFY_SUCCESS or BCTBX_VERIFY_FAILED
+ */
+BCTBX_PUBLIC int bctbx_EDDSA_verify(bctbx_EDDSAContext_t *context, const uint8_t *message, size_t messageLength, const uint8_t *associatedData, const size_t associatedDataLength, const uint8_t *signature, size_t signatureLength);
+
+
+/**
+ *
+ * @brief Convert a EDDSA private key to a ECDH private key
+ *      pass the EDDSA private key through the hash function used in EdDSA
+ *
+ * @param[in]	ed	Context holding the current private key to convert
+ * @param[out]	x	Context to store the private key for x25519 key exchange
+*/
+BCTBX_PUBLIC void bctbx_EDDSA_ECDH_privateKeyConversion(const bctbx_EDDSAContext_t *ed, bctbx_ECDHContext_t *x);
+
+#define BCTBX_ECDH_ISPEER	0
+#define BCTBX_ECDH_ISSELF	1
+
+/**
+ *
+ * @brief Convert a EDDSA public key to a ECDH public key
+ * 	point conversion : montgomeryX = (edwardsY + 1)*inverse(1 - edwardsY) mod p
+ *
+ * @param[in]	ed	Context holding the current public key to convert
+ * @param[out]	x	Context to store the public key for x25519 key exchange
+ * @param[in]	isSelf	Flag to decide where to store the public key in context: BCTBX_ECDH_ISPEER or BCTBX_ECDH_ISPEER
+*/
+BCTBX_PUBLIC void bctbx_EDDSA_ECDH_publicKeyConversion(const bctbx_EDDSAContext_t *ed, bctbx_ECDHContext_t *x, uint8_t isSelf);
+
 /*****************************************************************************/
 /***** Hashing                                                           *****/
 /*****************************************************************************/
+/*
+ * @brief SHA512 wrapper
+ * @param[in]	input 		Input data buffer
+ * @param[in]	inputLength	Input data length in bytes
+ * @param[in]	hashLength	Length of output required in bytes, Output is truncated to the hashLength left bytes. 64 bytes maximum
+ * @param[out]	output		Output data buffer.
+ *
+ */
+BCTBX_PUBLIC void bctbx_sha512(const uint8_t *input,
+		size_t inputLength,
+		uint8_t hashLength,
+		uint8_t *output);
+
+/*
+ * @brief SHA384 wrapper
+ * @param[in]	input 		Input data buffer
+ * @param[in]   inputLength	Input data length in bytes
+ * @param[in]	hashLength	Length of output required in bytes, Output is truncated to the hashLength left bytes. 48 bytes maximum
+ * @param[out]	output		Output data buffer.
+ *
+ */
+BCTBX_PUBLIC void bctbx_sha384(const uint8_t *input,
+		size_t inputLength,
+		uint8_t hashLength,
+		uint8_t *output);
+/**
+ * @brief SHA256 wrapper
+ * @param[in]	input 		Input data buffer
+ * @param[in]   inputLength	Input data length in bytes
+ * @param[in]	hmacLength	Length of output required in bytes, SHA256 output is truncated to the hashLength left bytes. 32 bytes maximum
+ * @param[out]	output		Output data buffer.
+ *
+ */
+BCTBX_PUBLIC void bctbx_sha256(const uint8_t *input,
+		size_t inputLength,
+		uint8_t hashLength,
+		uint8_t *output);
+
+/*
+ * @brief HMAC-SHA512 wrapper
+ * @param[in] 	key		HMAC secret key
+ * @param[in] 	keyLength	HMAC key length
+ * @param[in]	input 		Input data buffer
+ * @param[in]   inputLength	Input data length
+ * @param[in]	hmacLength	Length of output required in bytes, HMAC output is truncated to the hmacLength left bytes. 64 bytes maximum
+ * @param[out]	output		Output data buffer.
+ *
+ */
+BCTBX_PUBLIC void bctbx_hmacSha512(const uint8_t *key,
+		size_t keyLength,
+		const uint8_t *input,
+		size_t inputLength,
+		uint8_t hmacLength,
+		uint8_t *output);
+
+/**
+ * @brief HMAC-SHA384 wrapper
+ * @param[in] 	key		HMAC secret key
+ * @param[in] 	keyLength	HMAC key length in bytes
+ * @param[in]	input 		Input data buffer
+ * @param[in]   inputLength	Input data length in bytes
+ * @param[in]	hmacLength	Length of output required in bytes, HMAC output is truncated to the hmacLength left bytes. 48 bytes maximum
+ * @param[out]	output		Output data buffer.
+ *
+ */
+BCTBX_PUBLIC void bctbx_hmacSha384(const uint8_t *key,
+		size_t keyLength,
+		const uint8_t *input,
+		size_t inputLength,
+		uint8_t hmacLength,
+		uint8_t *output);
+
 /**
  * @brief HMAC-SHA256 wrapper
- * @param[in] 	key			HMAC secret key
+ * @param[in] 	key		HMAC secret key
  * @param[in] 	keyLength	HMAC key length in bytes
  * @param[in]	input 		Input data buffer
  * @param[in]   inputLength	Input data length in bytes
@@ -559,19 +925,6 @@ BCTBX_PUBLIC void bctbx_hmacSha256(const uint8_t *key,
 		const uint8_t *input,
 		size_t inputLength,
 		uint8_t hmacLength,
-		uint8_t *output);
-
-/**
- * @brief SHA256 wrapper
- * @param[in]	input 		Input data buffer
- * @param[in]   inputLength	Input data length in bytes
- * @param[in]	hmacLength	Length of output required in bytes, SHA256 output is truncated to the hashLength left bytes. 32 bytes maximum
- * @param[out]	output		Output data buffer.
- *
- */
-BCTBX_PUBLIC void bctbx_sha256(const uint8_t *input,
-		size_t inputLength,
-		uint8_t hashLength,
 		uint8_t *output);
 
 /**
@@ -768,6 +1121,18 @@ BCTBX_PUBLIC void bctbx_aes256CfbDecrypt(const uint8_t *key,
 		const uint8_t *input,
 		size_t inputLength,
 		uint8_t *output);
+
+/*****************************************************************************/
+/***** Cleaning                                                          *****/
+/*****************************************************************************/
+
+/**
+ * @brief force a buffer values to zero in a way that shall prevent the compiler from optimizing it out
+ *
+ * @param[in/out]	buffer	the buffer to be cleared
+ * @param[in]		size	buffer size
+ */
+BCTBX_PUBLIC void bctbx_clean(void *buffer, size_t size);
 
 #ifdef __cplusplus
 }

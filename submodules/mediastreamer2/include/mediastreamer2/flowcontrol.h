@@ -24,10 +24,10 @@
 
 
 typedef struct _MSAudioFlowController {
-	int target_samples;
-	int total_samples;
-	int current_pos;
-	int current_dropped;
+	uint32_t target_samples;
+	uint32_t total_samples;
+	uint32_t current_pos;
+	uint32_t current_dropped;
 } MSAudioFlowController;
 
 
@@ -37,9 +37,23 @@ extern "C"{
 
 MS2_PUBLIC void ms_audio_flow_controller_init(MSAudioFlowController *ctl);
 
-MS2_PUBLIC void ms_audio_flow_controller_set_target(MSAudioFlowController *ctl, int samples_to_drop, int total_samples);
+MS2_PUBLIC void ms_audio_flow_controller_set_target(MSAudioFlowController *ctl, uint32_t samples_to_drop, uint32_t total_samples);
 
 MS2_PUBLIC mblk_t *ms_audio_flow_controller_process(MSAudioFlowController *ctl, mblk_t *m);
+
+
+/**
+ * Structure carried by MS_AUDIO_FLOW_CONTROL_DROP_EVENT
+**/
+typedef struct _MSAudioFlowControlDropEvent{
+	uint32_t flow_control_interval_ms;
+	uint32_t drop_ms;
+} MSAudioFlowControlDropEvent;
+
+/**
+ * Event sent by the filter each time some samples need to be dropped.
+**/
+#define MS_AUDIO_FLOW_CONTROL_DROP_EVENT MS_FILTER_EVENT(MS_AUDIO_FLOW_CONTROL_ID, 0, MSAudioFlowControlDropEvent)
 
 
 #ifdef __cplusplus

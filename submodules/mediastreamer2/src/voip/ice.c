@@ -51,6 +51,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #define ICE_GATHERING_CANDIDATES_TIMEOUT	5000	/* In milliseconds */
 #define ICE_NOMINATION_DELAY		1000	/* In milliseconds */
 #define ICE_MAX_RETRANSMISSIONS		7
+#define ICE_MAX_RETRANSMISSIONS_FOR_NOMINATIONS	5
 #define ICE_MAX_STUN_REQUEST_RETRANSMISSIONS	7
 
 
@@ -141,7 +142,9 @@ static int ice_compare_pairs(const IceCandidatePair *p1, const IceCandidatePair 
 static int ice_compare_candidates(const IceCandidate *c1, const IceCandidate *c2);
 static int ice_find_host_candidate(const IceCandidate *candidate, const ComponentID_Family *cf);
 static int ice_find_candidate_from_type_and_componentID(const IceCandidate *candidate, const Type_ComponentID *tc);
+#if 0
 static int ice_find_use_candidate_valid_pair_from_componentID(const IceValidCandidatePair* valid_pair, const uint16_t* componentID);
+#endif
 static int ice_find_nominated_valid_pair_from_componentID(const IceValidCandidatePair* valid_pair, const uint16_t* componentID);
 static int ice_find_selected_valid_pair_from_componentID(const IceValidCandidatePair* valid_pair, const uint16_t* componentID);
 static void ice_find_selected_valid_pair_for_componentID(const uint16_t *componentID, CheckList_Bool *cb);
@@ -149,13 +152,16 @@ static int ice_find_pair_in_valid_list(IceValidCandidatePair *valid_pair, IceCan
 static void ice_pair_set_state(IceCandidatePair *pair, IceCandidatePairState state);
 static void ice_compute_candidate_foundation(IceCandidate *candidate, IceCheckList *cl);
 static void ice_set_credentials(char **ufrag, char **pwd, const char *ufrag_str, const char *pwd_str);
-static void ice_conclude_processing(IceCheckList* cl, RtpSession* rtp_session);
+static void ice_conclude_processing(IceCheckList* cl, RtpSession* rtp_session, bool_t nomination_delay_expired);
 static void ice_check_list_stop_gathering(IceCheckList *cl);
 static void ice_check_list_remove_stun_server_request(IceCheckList *cl, UInt96 *tr_id);
 static IceStunServerRequest * ice_check_list_get_stun_server_request(IceCheckList *cl, UInt96 *tr_id);
 static void ice_transport_address_to_printable_ip_address(const IceTransportAddress *taddr, char *printable_ip, size_t printable_ip_size);
 static void ice_stun_server_request_add_transaction(IceStunServerRequest *request, IceStunServerRequestTransaction *transaction);
-
+static void ice_check_list_perform_nominations(IceCheckList *cl, bool_t nomination_delay_expired);
+#if 0
+static int ice_session_connectivity_checks_duration(IceSession *session);
+#endif
 
 /******************************************************************************
  * CONSTANTS DEFINITIONS                                                      *
@@ -226,6 +232,7 @@ static void ice_session_init(IceSession *session)
 	session->send_event = FALSE;
 	session->gathering_start_ts.tv_sec = session->gathering_start_ts.tv_nsec = -1;
 	session->gathering_end_ts.tv_sec = session->gathering_end_ts.tv_nsec = -1;
+	session->connectivity_checks_start_ts.tv_sec = session->connectivity_checks_start_ts.tv_nsec = -1;
 	session->check_message_integrity=TRUE;
 	session->default_types[0] = ICT_RelayedCandidate;
 	session->default_types[1] = ICT_ServerReflexiveCandidate;
@@ -333,7 +340,6 @@ static IceCandidatePair *ice_pair_new(IceCheckList *cl, IceCandidate* local_cand
 	pair->is_default = FALSE;
 	pair->is_nominated = FALSE;
 	pair->use_candidate = FALSE;
-	pair->wait_transaction_timeout = FALSE;
 	if ((pair->local->is_default == TRUE) && (pair->remote->is_default == TRUE)) pair->is_default = TRUE;
 	else pair->is_default = FALSE;
 	pair->rto = ICE_DEFAULT_RTO_DURATION;
@@ -1094,6 +1100,16 @@ int ice_session_gathering_duration(IceSession *session)
 		+ ((session->gathering_end_ts.tv_nsec - session->gathering_start_ts.tv_nsec) / 1000000.0));
 }
 
+#if 0
+int ice_session_connectivity_checks_duration(IceSession *session) {
+	MSTimeSpec current_ts;
+	if (session->connectivity_checks_start_ts.tv_sec == -1) return -1;
+	ms_get_cur_time(&current_ts);
+	return (int)(((current_ts.tv_sec - session->connectivity_checks_start_ts.tv_sec) * 1000.0)
+		+ ((current_ts.tv_nsec - session->connectivity_checks_start_ts.tv_nsec) / 1000000.0));
+}
+#endif
+
 void ice_session_enable_forced_relay(IceSession *session, bool_t enable) {
 	session->forced_relay = enable;
 }
@@ -1216,7 +1232,7 @@ static IceTransaction * ice_create_transaction(IceCheckList *cl, IceCandidatePai
 
 static int ice_find_transaction_from_pair(const IceTransaction *transaction, const IceCandidatePair *pair)
 {
-	return (transaction->pair != pair);
+	return (transaction->pair != pair) && !transaction->canceled;
 }
 
 static IceTransaction * ice_find_transaction(const IceCheckList *cl, const IceCandidatePair *pair)
@@ -1269,11 +1285,11 @@ static int ice_send_message_to_socket(RtpTransport * rtptp, char* buf, size_t le
 	mblk_t *m = rtp_session_create_packet_raw((const uint8_t *)buf, len);
 	int err;
 	struct addrinfo *v6ai = NULL;
-	
+
 	memcpy(&m->net_addr, from, fromlen);
 	m->net_addrlen = fromlen;
 	if ((rtptp->session->rtp.gs.sockfamily == AF_INET6) && (to->sa_family == AF_INET)) {
-		
+
 		char to_addr_str[64];
 		int to_port = 0;
 		memset(to_addr_str, 0, sizeof(to_addr_str));
@@ -1449,18 +1465,17 @@ static void ice_send_binding_request(IceCheckList *cl, IceCandidatePair *pair, c
 			ms_error("ice: No transaction found for InProgress pair");
 			return;
 		}
-		if (pair->wait_transaction_timeout == TRUE) {
-			/* Special case where a binding response triggers a binding request for an InProgress pair. */
-			/* In this case we wait for the transmission timeout before creating a new binding request for the pair. */
-			pair->wait_transaction_timeout = FALSE;
-			if (pair->use_candidate == FALSE) {
-				ice_pair_set_state(pair, ICP_Waiting);
-				ice_check_list_queue_triggered_check(cl, pair);
-			}
-			return;
-		}
 		/* This is a retransmission: update the number of retransmissions, the retransmission timer value, and the transmission time. */
 		pair->retransmissions++;
+		if (cl->session->role == IR_Controlling && pair->use_candidate && !pair->nomination_failing && pair->retransmissions > ICE_MAX_RETRANSMISSIONS_FOR_NOMINATIONS){
+			/*The nomination process is abnormally long: possibly the nat association has been accidentally closed by the media stream.
+			 * Nominate an alternate pair if possible*/
+			pair->nomination_failing = TRUE;
+			cl->nomination_in_progress = FALSE;
+			ice_check_list_perform_nominations(cl, FALSE);
+			/*Despite we've started a new nomination, we continue the retransmissions for that pair, in case a response is finally received.*/
+		}
+
 		if (pair->retransmissions > ICE_MAX_RETRANSMISSIONS) {
 			/* Too much retransmissions, stop sending connectivity checks for this pair. */
 			ice_pair_set_state(pair, ICP_Failed);
@@ -1525,8 +1540,9 @@ static void ice_send_binding_request(IceCheckList *cl, IceCandidatePair *pair, c
 			ms_message("ice: Retransmit (%d) binding request for pair %p: %s:%s --> %s:%s [%s]", pair->retransmissions, pair,
 				local_addr_str, candidate_type_values[pair->local->type], remote_addr_str, candidate_type_values[pair->remote->type], tr_id_str);
 		} else {
-			ms_message("ice: Send binding request for %s pair %p: %s:%s --> %s:%s [%s]", candidate_pair_state_values[pair->state], pair,
-				local_addr_str, candidate_type_values[pair->local->type], remote_addr_str, candidate_type_values[pair->remote->type], tr_id_str);
+			ms_message("ice: Send binding request for %s pair %p: %s:%s --> %s:%s [%s] (flags:%s)", candidate_pair_state_values[pair->state], pair,
+				local_addr_str, candidate_type_values[pair->local->type], remote_addr_str, candidate_type_values[pair->remote->type], tr_id_str,
+				pair->use_candidate ? "use-candidate" : "none");
 		}
 
 		if ((cl->session->forced_relay == TRUE) && (pair->remote->type != ICT_RelayedCandidate) && (pair->local->type != ICT_RelayedCandidate)) {
@@ -1762,12 +1778,30 @@ static void ice_send_keepalive_packet_for_componentID(const uint16_t *componentI
 	}
 }
 
-static void ice_send_keepalive_packets(IceCheckList *cl, const RtpSession *rtp_session)
+static void ice_check_keep_alive_on_valid_pair(IceValidCandidatePair *valid, RtpSession *rtp_session, const MSTimeSpec *curtime){
+	if (ice_compare_time(*curtime, valid->last_keepalive) >= 3000){
+		ice_send_indication(valid->valid, rtp_session);
+		valid->last_keepalive = *curtime;
+	}
+}
+
+static void ice_send_keepalive_packets(IceCheckList *cl, RtpSession *rtp_session)
 {
 	CheckList_RtpSession cr;
-	cr.cl = cl;
-	cr.rtp_session = rtp_session;
-	bctbx_list_for_each2(cl->local_componentIDs, (void (*)(void*,void*))ice_send_keepalive_packet_for_componentID, &cr);
+	if (cl->state == ICL_Completed){
+		cr.cl = cl;
+		cr.rtp_session = rtp_session;
+		bctbx_list_for_each2(cl->local_componentIDs, (void (*)(void*,void*))ice_send_keepalive_packet_for_componentID, &cr);
+	}else if (cl->state == ICL_Running){
+		bctbx_list_t *elem;
+		MSTimeSpec curtime;
+		ms_get_cur_time(&curtime);
+		/*refresh pairs on the valid list, to keep them alive until conclusion*/
+		for (elem = cl->valid_list ; elem != NULL ; elem = elem->next){
+			IceValidCandidatePair *valid = (IceValidCandidatePair*)elem->data;
+			ice_check_keep_alive_on_valid_pair(valid, rtp_session, &curtime);
+		}
+	}
 }
 
 static int ice_find_candidate_from_transport_address(const IceCandidate *candidate, const IceTransportAddress *taddr)
@@ -1994,7 +2028,7 @@ static IceCandidatePair * ice_trigger_connectivity_check_on_binding_request(IceC
 	elem = bctbx_list_find_custom(cl->check_list, (bctbx_compare_func)ice_find_pair_from_candidates, &candidates);
 	if (elem == NULL) {
 		/* The pair is not in the check list yet. */
-		ms_message("ice: Add new candidate pair in the check list");
+		ms_message("ice: Add new candidate pair [%p - %p] in the check list", candidates.local, candidates.remote);
 		/* Check if the pair is in the list of pairs even if it is not in the check list. */
 		elem = bctbx_list_find_custom(cl->pairs, (bctbx_compare_func)ice_find_pair_from_candidates, &candidates);
 		if (elem == NULL) {
@@ -2021,8 +2055,20 @@ static IceCandidatePair * ice_trigger_connectivity_check_on_binding_request(IceC
 				ice_check_list_queue_triggered_check(cl, pair);
 				break;
 			case ICP_InProgress:
-				/* Wait transaction timeout before creating a new binding request for this pair. */
-				pair->wait_transaction_timeout = TRUE;
+				ms_message("ice: we are receiving a STUN request on pair %p, for which an outgoing STUN transaction is running.", pair);
+
+				if (!pair->has_canceled_transaction){
+					/*cancel the transaction, but this may happen only once.*/
+					IceTransaction *tr = ice_find_transaction(cl, pair);
+					if (tr){
+						ms_message("ice: transaction is canceled, a new binding request sent.");
+						tr->canceled = TRUE;
+						/*and queue a new triggered check*/
+						ice_pair_set_state(pair, ICP_Waiting);
+						ice_check_list_queue_triggered_check(cl, pair);
+						pair->has_canceled_transaction = TRUE;
+					}
+				}
 				break;
 			case ICP_Succeeded:
 				/* Nothing to be done. */
@@ -2032,22 +2078,52 @@ static IceCandidatePair * ice_trigger_connectivity_check_on_binding_request(IceC
 	return pair;
 }
 
+static IceCandidatePair *ice_lookup_possible_valid_pair(const IceCheckList *cl, IceCandidatePair *pair){
+	const bctbx_list_t *elem;
+
+	for (elem = cl->valid_list; elem != NULL; elem = elem->next){
+		IceValidCandidatePair *valid = (IceValidCandidatePair*) elem->data;
+		if (pair == valid->valid){
+			return pair;
+		}
+		if (valid->generated_from == pair){
+			ms_message("ice: found the reflexive candidate corresponding to the candidate pair on which the binding request was received.");
+			return valid->valid; /*return the peer reflexive candidate pair*/
+		}
+	}
+	return NULL;
+}
+
 /* Update the nominated flag of a candidate pair according to 7.2.1.5. */
 static void ice_update_nominated_flag_on_binding_request(const IceCheckList *cl, const MSStunMessage *msg, IceCandidatePair *pair)
 {
 	if (ms_stun_message_use_candidate_enabled(msg) && (cl->session->role == IR_Controlled)) {
+		IceCandidatePair *valid = ice_lookup_possible_valid_pair(cl, pair);
+
 		switch (pair->state) {
 			case ICP_Succeeded:
-				pair->is_nominated = TRUE;
+				if (valid){
+					valid->is_nominated = TRUE;
+					ms_message("ice: receiving a binding request with use-candidate flag on succeeded pair");
+				}else{
+					ms_warning("ice: receiving a binding request with use-candidate flag on succeeded pair that is not in the valid list.");
+					pair->is_nominated = TRUE;
+				}
 				break;
 			case ICP_Waiting:
 			case ICP_Frozen:
 			case ICP_InProgress:
+				/*Normally valid should be null if go here*/
+				ms_message("ice: receiving a binding request with nominated flag on non-succeeded pair");
+				pair->nomination_pending = TRUE; /*We cannot accept the nomination immediately. We will wait for our pair to complete its bind requests, and then
+					the pair will be officially nominated*/
+				break;
 			case ICP_Failed:
-				/* Nothing to be done. */
+				ms_error("ice: receiving a binding request with nominated flag on failed pair. This should not happen.");
 				break;
 		}
 	}
+	//ice_dump_valid_list(cl);
 }
 
 static void ice_handle_received_binding_request(IceCheckList *cl, RtpSession *rtp_session, const OrtpEventData *evt_data, const MSStunMessage *msg, const MSStunAddress *remote_addr) {
@@ -2065,7 +2141,7 @@ static void ice_handle_received_binding_request(IceCheckList *cl, RtpSession *rt
 	pair = ice_trigger_connectivity_check_on_binding_request(cl, rtp_session, evt_data, prflx_candidate, &taddr);
 	if (pair != NULL) ice_update_nominated_flag_on_binding_request(cl, msg, pair);
 	ice_send_binding_response(cl,rtp_session, evt_data, msg, remote_addr);
-	ice_conclude_processing(cl, rtp_session);
+	ice_conclude_processing(cl, rtp_session, FALSE);
 }
 
 static int ice_find_stun_server_request(const IceStunServerRequest *request, const RtpTransport *rtptp)
@@ -2164,7 +2240,7 @@ static int ice_compare_valid_pair_priorities(const IceValidCandidatePair *vp1, c
 
 static int ice_find_valid_pair(const IceValidCandidatePair *vp1, const IceValidCandidatePair *vp2)
 {
-	return !((vp1->valid == vp2->valid) && (vp1->generated_from == vp2->generated_from));
+	return ice_compare_pairs(vp1->valid, vp2->valid) || ice_compare_pairs(vp1->generated_from, vp2->generated_from);
 }
 
 /* Construct a valid ICE candidate pair as defined in 7.1.3.2.2. */
@@ -2192,6 +2268,7 @@ static IceCandidatePair * ice_construct_valid_pair(IceCheckList *cl, RtpSession 
 	valid_pair = ms_new0(IceValidCandidatePair, 1);
 	valid_pair->valid = pair;
 	valid_pair->generated_from = succeeded_pair;
+	ms_get_cur_time(&valid_pair->last_keepalive); /*initialize the origin of keepalives*/
 	valid_pair->selected = FALSE;
 	memset(local_addr_str, 0, sizeof(local_addr_str));
 	memset(remote_addr_str, 0, sizeof(remote_addr_str));
@@ -2202,6 +2279,7 @@ static IceCandidatePair * ice_construct_valid_pair(IceCheckList *cl, RtpSession 
 		cl->valid_list = bctbx_list_insert_sorted(cl->valid_list, valid_pair, (bctbx_compare_func)ice_compare_valid_pair_priorities);
 		ms_message("ice: Added pair %p to the valid list: %s:%s --> %s:%s", pair,
 			local_addr_str, candidate_type_values[pair->local->type], remote_addr_str, candidate_type_values[pair->remote->type]);
+		//ice_dump_valid_list(cl);
 		elem = bctbx_list_find_custom(cl->losing_pairs, (bctbx_compare_func)ice_find_pair_from_candidates, &candidates);
 		if (elem != NULL) {
 			cl->losing_pairs = bctbx_list_erase_link(cl->losing_pairs, elem);
@@ -2215,12 +2293,13 @@ static IceCandidatePair * ice_construct_valid_pair(IceCheckList *cl, RtpSession 
 				rtp_session_dispatch_event(rtp_session, ev);
 			}
 		}
+		return pair;
 	} else {
 		ms_message("ice: Pair already in the valid list: %s:%s --> %s:%s",
 			local_addr_str, candidate_type_values[pair->local->type], remote_addr_str, candidate_type_values[pair->remote->type]);
 		ms_free(valid_pair);
+		return ((IceValidCandidatePair *)(elem->data))->valid;
 	}
-	return pair;
 }
 
 static int ice_compare_pair_foundations(const IceCandidatePair *p1, const IceCandidatePair *p2)
@@ -2248,17 +2327,20 @@ static void ice_update_pair_states_on_binding_response(IceCheckList *cl, IceCand
 }
 
 /* Update the nominated flag of a candidate pair according to 7.1.3.2.4. */
-static void ice_update_nominated_flag_on_binding_response(const IceCheckList *cl, IceCandidatePair *valid_pair, const IceCandidatePair *succeeded_pair, IceCandidatePairState succeeded_pair_previous_state)
+static void ice_update_nominated_flag_on_binding_response(const IceCheckList *cl, IceCandidatePair *valid_pair, IceCandidatePair *succeeded_pair)
 {
 	switch (cl->session->role) {
 		case IR_Controlling:
 			if (succeeded_pair->use_candidate == TRUE) {
+				valid_pair->nomination_failing = FALSE;
 				valid_pair->is_nominated = TRUE;
+				//ice_dump_valid_list(cl);
 			}
 			break;
 		case IR_Controlled:
-			if (succeeded_pair_previous_state == ICP_InProgress) {
+			if (succeeded_pair->nomination_pending) {
 				valid_pair->is_nominated = TRUE;
+				succeeded_pair->nomination_pending = FALSE;
 			}
 			break;
 	}
@@ -2396,7 +2478,7 @@ static bool_t ice_handle_received_turn_allocate_success_response(IceCheckList *c
 						candidate = ice_add_local_candidate(cl, "srflx", ms_stun_family_to_af(srflx_addr.family), srflx_addr_str, srflx_port, componentID, candidate);
 						ms_stun_address_to_printable_ip_address(&srflx_addr, srflx_addr_str, sizeof(srflx_addr_str));
 						ms_message("ice: Add candidate obtained by STUN/TURN: %s:srflx", srflx_addr_str);
-						
+
 						if (cl->session->turn_enabled) {
 							request->turn_context->stats.nb_successful_allocate++;
 							ice_schedule_turn_allocation_refresh(cl, componentID, ms_stun_message_get_lifetime(msg));
@@ -2486,9 +2568,12 @@ static void ice_handle_received_binding_response(IceCheckList *cl, RtpSession *r
 	IceCandidatePair *succeeded_pair;
 	IceCandidatePair *valid_pair;
 	IceCandidate *candidate;
-	IceCandidatePairState succeeded_pair_previous_state;
 	bctbx_list_t *elem;
+	IceTransaction *tr;
 	UInt96 tr_id = ms_stun_message_get_tr_id(msg);
+	char tr_id_str[25];
+
+	transactionID2string(&tr_id, tr_id_str);
 
 	if (cl->gathering_candidates == TRUE) {
 		if (ice_handle_received_turn_allocate_success_response(cl, rtp_session, evt_data, msg, remote_addr) == TRUE)
@@ -2497,23 +2582,28 @@ static void ice_handle_received_binding_response(IceCheckList *cl, RtpSession *r
 
 	elem = bctbx_list_find_custom(cl->transaction_list, (bctbx_compare_func)ice_find_pair_from_transactionID, &tr_id);
 	if (elem == NULL) {
-		/* We received an error response concerning an unknown binding request, ignore it... */
-		char tr_id_str[25];
-		transactionID2string(&tr_id, tr_id_str);
+		/* We received an a binding response concerning an unknown binding request, ignore it... */
 		ms_warning("ice: Received a binding response for an unknown transaction ID: %s", tr_id_str);
 		return;
 	}
+	tr = (IceTransaction*)elem->data;
+	if (tr->canceled){
+		/* We received an binding response concerning a canceled binding request transaction*/
+		ms_message("ice: Received a binding response for an cancelled transaction ID: %s", tr_id_str);
+		/* It has to be processed anyway. According to 7.3.1.4 , cancellation just stop retransmission and do not
+		 * consider the lack of response as a failure.*/
+	}
+
 
 	succeeded_pair = (IceCandidatePair *)((IceTransaction *)elem->data)->pair;
 	if (ice_check_received_binding_response_addresses(rtp_session, evt_data, succeeded_pair, remote_addr) < 0) return;
 	if (ice_check_received_binding_response_attributes(msg, remote_addr,cl->session->check_message_integrity) < 0) return;
 
-	succeeded_pair_previous_state = succeeded_pair->state;
 	candidate = ice_discover_peer_reflexive_candidate(cl, succeeded_pair, msg);
 	valid_pair = ice_construct_valid_pair(cl, rtp_session, evt_data, candidate, succeeded_pair);
 	ice_update_pair_states_on_binding_response(cl, succeeded_pair);
-	ice_update_nominated_flag_on_binding_response(cl, valid_pair, succeeded_pair, succeeded_pair_previous_state);
-	ice_conclude_processing(cl, rtp_session);
+	ice_update_nominated_flag_on_binding_response(cl, valid_pair, succeeded_pair);
+	ice_conclude_processing(cl, rtp_session, FALSE);
 }
 
 static void ice_handle_stun_server_error_response(IceCheckList *cl, RtpSession *rtp_session, const OrtpEventData *evt_data, const MSStunMessage *msg)
@@ -2602,7 +2692,7 @@ static void ice_handle_received_error_response(IceCheckList *cl, RtpSession *rtp
 			ice_check_list_queue_triggered_check(cl, pair);
 		}
 
-		ice_conclude_processing(cl, rtp_session);
+		ice_conclude_processing(cl, rtp_session, FALSE);
 	}
 }
 
@@ -2677,7 +2767,8 @@ void ice_handle_stun_packet(IceCheckList *cl, RtpSession *rtp_session, const Ort
 	ms_stun_address_to_printable_ip_address(&source_stun_addr, source_addr_str, sizeof(source_addr_str));
 
 	if (ms_stun_message_is_request(msg)) {
-		ms_message("ice: Recv binding request: %s <-- %s [%s]", recv_addr_str, source_addr_str, tr_id_str);
+		ms_message("ice: Recv binding request: %s <-- %s [%s] (flags:%s)", recv_addr_str, source_addr_str, tr_id_str,
+			ms_stun_message_use_candidate_enabled(msg) ? "use-candidate" : "none");
 		ice_handle_received_binding_request(cl, rtp_session, evt_data, msg, &source_stun_addr);
 	} else if (ms_stun_message_is_success_response(msg)) {
 		ice_set_transaction_response_time(cl, &tr_id, evt_data->ts);
@@ -2706,7 +2797,7 @@ void ice_handle_stun_packet(IceCheckList *cl, RtpSession *rtp_session, const Ort
 				ms_warning("ice: Recv unknown STUN success response: %s <-- %s [%s]", recv_addr_str, source_addr_str, tr_id_str);
 				break;
 		}
-		
+
 	} else if (ms_stun_message_is_error_response(msg)) {
 		ice_set_transaction_response_time(cl, &tr_id, evt_data->ts);
 		ms_message("ice: Recv error response: %s <-- %s [%s]", recv_addr_str, source_addr_str, tr_id_str);
@@ -2724,6 +2815,15 @@ void ice_handle_stun_packet(IceCheckList *cl, RtpSession *rtp_session, const Ort
 /******************************************************************************
  * ADD CANDIDATES                                                             *
  *****************************************************************************/
+
+static void ice_compute_candidate_priority(IceCandidate *candidate)
+{
+	// TODO: Handle local preferences for multihomed hosts.
+	uint32_t type_preference = type_preference_values[candidate->type];
+	uint32_t local_preference = 65535;	/* Value recommended for non-multihomed hosts in 4.1.2.1 */
+	uint32_t af_preference = candidate->taddr.family == AF_INET6 ? 1<<7 : 0;
+	candidate->priority = (type_preference << 24) | (local_preference << 8) | af_preference | (128 - candidate->componentID);
+}
 
 static IceCandidate * ice_candidate_new(const char *type, int family, const char *ip, int port, uint16_t componentID)
 {
@@ -2763,16 +2863,8 @@ static IceCandidate * ice_candidate_new(const char *type, int family, const char
 			candidate->base = NULL;
 			break;
 	}
-
+	ice_compute_candidate_priority(candidate);
 	return candidate;
-}
-
-static void ice_compute_candidate_priority(IceCandidate *candidate)
-{
-	// TODO: Handle local preferences for multihomed hosts.
-	uint8_t type_preference = type_preference_values[candidate->type];
-	uint16_t local_preference = 65535;	/* Value recommended for non-multihomed hosts in 4.1.2.1 */
-	candidate->priority = (type_preference << 24) | (local_preference << 8) | (256 - candidate->componentID);
 }
 
 static int ice_find_componentID(const uint16_t *cid1, const uint16_t *cid2)
@@ -2804,7 +2896,6 @@ IceCandidate * ice_add_local_candidate(IceCheckList* cl, const char* type, int f
 
 	candidate = ice_candidate_new(type, family, ip, port, componentID);
 	if (candidate->base == NULL) candidate->base = base;
-	ice_compute_candidate_priority(candidate);
 
 	elem = bctbx_list_find_custom(cl->local_candidates, (bctbx_compare_func)ice_compare_candidates, candidate);
 	if (elem != NULL) {
@@ -2831,8 +2922,7 @@ IceCandidate * ice_add_remote_candidate(IceCheckList *cl, const char *type, int 
 
 	candidate = ice_candidate_new(type, family, ip, port, componentID);
 	/* If the priority is 0, compute it. It is used for debugging purpose in mediastream to set priorities of remote candidates. */
-	if (priority == 0) ice_compute_candidate_priority(candidate);
-	else candidate->priority = priority;
+	if (priority != 0) candidate->priority = priority;
 
 	elem = bctbx_list_find_custom(cl->remote_candidates, (bctbx_compare_func)ice_compare_candidates, candidate);
 	if (elem != NULL) {
@@ -2911,8 +3001,8 @@ void ice_add_losing_pair(IceCheckList *cl, uint16_t componentID, int local_famil
 	taddr.family = local_family;
 	elem = bctbx_list_find_custom(cl->local_candidates, (bctbx_compare_func)ice_find_candidate_from_transport_address, &taddr);
 	if (elem == NULL) {
-		/* Workaround to detect if the local candidate that has not been found has been added by the proxy server.
-		   If that is the case, add it to the local candidates now. */
+		// Workaround to detect if the local candidate that has not been found has been added by the proxy server.
+		// If that is the case, add it to the local candidates now.
 		elem = bctbx_list_find_custom(cl->remote_candidates, (bctbx_compare_func)ice_find_candidate_from_ip_address, local_addr);
 		if (elem != NULL) {
 			tc.componentID = componentID;
@@ -3359,6 +3449,8 @@ static void ice_compute_pairs_states(IceCheckList *cl)
 static void ice_check_list_pair_candidates(IceCheckList *cl)
 {
 	if (cl->state == ICL_Running) {
+		cl->connectivity_checks_running = TRUE;
+		ms_message("ICE: connectivity checks are going to start for check list %p", cl);
 		ice_form_candidate_pairs(cl);
 		ice_prune_candidate_pairs(cl);
 		/* Generate pair foundations list. */
@@ -3393,6 +3485,7 @@ void ice_session_start_connectivity_checks(IceSession *session)
 {
 	ice_session_pair_candidates(session);
 	session->state = IS_Running;
+	ms_get_cur_time(&session->connectivity_checks_start_ts);
 }
 
 
@@ -3400,6 +3493,7 @@ void ice_session_start_connectivity_checks(IceSession *session)
  * CONCLUDE ICE PROCESSING                                                    *
  *****************************************************************************/
 
+#if 0
 static void ice_perform_regular_nomination(IceValidCandidatePair *valid_pair, CheckList_RtpSession *cr)
 {
 	if (valid_pair->generated_from->use_candidate == FALSE) {
@@ -3407,23 +3501,132 @@ static void ice_perform_regular_nomination(IceValidCandidatePair *valid_pair, Ch
 		if (elem == NULL) {
 			if (valid_pair->valid->remote->type == ICT_RelayedCandidate) {
 				MSTimeSpec curtime = ice_current_time();
-				if (cr->cl->nomination_delay_running == FALSE) {
+				if ((cr->cl->nomination_delay_running == FALSE) && (cr->cl->nomination_delay_timer_has_already_triggered == FALSE)) {
 					/* There is a potential valid pair but it is a relayed candidate, wait a little so that a better choice may be found. */
 					ms_message("ice: Potential relayed valid pair, wait for a better pair.");
 					cr->cl->nomination_delay_running = TRUE;
 					cr->cl->nomination_delay_start_time = ice_current_time();
-				} else if (ice_compare_time(curtime, cr->cl->nomination_delay_start_time) >= ICE_NOMINATION_DELAY) {
+					cr->cl->nomination_delay_timer_has_already_triggered = TRUE;
+				} else if (cr->cl->nomination_delay_running && ice_compare_time(curtime, cr->cl->nomination_delay_start_time) >= ICE_NOMINATION_DELAY) {
+					ms_message("ice: Nomination delay timeout while performing nomination, select the potential relayed candidate anyway.");
 					cr->cl->nomination_delay_running = FALSE;
 					valid_pair->generated_from->use_candidate = TRUE;
 					ice_check_list_queue_triggered_check(cr->cl, valid_pair->generated_from);
 				}
 			} else {
+				ms_message("ice: We were waiting for a better pair and found one, use it!");
 				cr->cl->nomination_delay_running = FALSE;
 				valid_pair->generated_from->use_candidate = TRUE;
 				ice_check_list_queue_triggered_check(cr->cl, valid_pair->generated_from);
 			}
 		}
 	}
+}
+#endif
+
+static int valid_pair_compare(IceValidCandidatePair* new_pair, IceValidCandidatePair * pair_in_list){
+	//ms_message("ice: priorities %lu  <>   %lu", (unsigned long)p1->generated_from->priority, (unsigned long)p2->generated_from->priority);
+	return pair_in_list->generated_from->priority > new_pair->generated_from->priority;
+}
+
+static bctbx_list_t * ice_get_valid_pairs_for_componentID(IceCheckList *cl, uint16_t componentID){
+	const bctbx_list_t *it;
+	bctbx_list_t *ret = NULL;
+	for (it = cl->valid_list; it != NULL; it = it->next){
+		IceValidCandidatePair *valid_pair = (IceValidCandidatePair *)it->data;
+		if (valid_pair->valid->local->componentID == componentID){
+			ret = bctbx_list_insert_sorted(ret, valid_pair, (bctbx_compare_func) valid_pair_compare);
+		}
+	}
+	return ret;
+}
+
+static void ice_pair_stop_retransmissions(IceCandidatePair *pair, IceCheckList *cl)
+{
+	bctbx_list_t *elem;
+	if (pair->state == ICP_InProgress) {
+		ice_pair_set_state(pair, ICP_Failed);
+		elem = bctbx_list_find(cl->triggered_checks_queue, pair);
+		if (elem != NULL) {
+			cl->triggered_checks_queue = bctbx_list_erase_link(cl->triggered_checks_queue, elem);
+		}
+	}
+}
+
+static void ice_check_list_stop_retransmissions(IceCheckList *cl)
+{
+	bctbx_list_for_each2(cl->check_list, (void (*)(void*,void*))ice_pair_stop_retransmissions, cl);
+}
+
+static void ice_check_list_nominate(IceCheckList *cl, const bctbx_list_t *best_valid_list){
+	const bctbx_list_t *it;
+	for (it = best_valid_list ; it != NULL; it = it->next){
+		IceValidCandidatePair *valid_pair = (IceValidCandidatePair *)it->data;
+		if (valid_pair->generated_from->use_candidate == FALSE){
+			valid_pair->generated_from->use_candidate = TRUE;
+			ice_check_list_queue_triggered_check(cl, valid_pair->generated_from);
+		}
+	}
+	cl->nomination_in_progress = TRUE;
+}
+
+static void ice_check_list_perform_nominations(IceCheckList *cl, bool_t nomination_delay_expired){
+	const bctbx_list_t *comp_it;
+	bctbx_list_t *best_valid_list = NULL;
+	bool_t concludable = TRUE;
+	bool_t need_more_time = FALSE;
+	int nominations_to_do = 0;
+
+	if (cl->nomination_in_progress) return;
+
+	for (comp_it = cl->local_componentIDs; comp_it != NULL; comp_it = comp_it->next){
+		IceValidCandidatePair *valid_pair;
+		bctbx_list_t *valid_it = NULL;
+		bctbx_list_t *valid_list = NULL;
+
+		uint16_t componentID = *(const uint16_t *)comp_it->data;
+		valid_list = ice_get_valid_pairs_for_componentID(cl, componentID);
+		if (valid_list == NULL){
+			ms_message("ice_check_list_perform_nominations(cl=%p): no valid pairs yet for componentID %i", cl, (int)componentID);
+			concludable = FALSE;
+			break;
+		}
+		/* Normally the first element in the list is the best one to nominate.
+		 * However if nomination is failing, we'll nominate the next one and so one.
+		 */
+		for (valid_it = valid_list; valid_it != NULL ; valid_it = valid_it->next){
+			valid_pair = (IceValidCandidatePair*) valid_it->data;
+			if (valid_pair->generated_from->nomination_failing){
+				ms_message("ice_check_list_perform_nominations(): a nominated pair is not responding");
+			} else break;
+		}
+		if (valid_it){
+			valid_pair = (IceValidCandidatePair*) valid_it->data;
+			if (valid_pair->generated_from->remote->type == ICT_RelayedCandidate){
+				need_more_time = TRUE;
+			}
+			best_valid_list = bctbx_list_append(best_valid_list, valid_pair);
+			if (valid_pair->generated_from->use_candidate == FALSE) nominations_to_do++;
+		}else{
+			ms_warning("ice_check_list_perform_nominations(cl=%p): no more pair to nominate for componentID %i", cl, (int)componentID);
+		}
+		bctbx_list_free(valid_list);
+	}
+	if (concludable && nominations_to_do > 0){
+		ms_message("ice_check_list_perform_nominations(): check list is concludable.");
+		if (need_more_time && !cl->nomination_delay_running){
+			ms_message("ice_check_list_perform_nominations(cl=%p): for a component, the best candidate is a relay one, let's wait a bit before performing nomination", cl);
+		}
+		if (nomination_delay_expired || need_more_time == FALSE){
+			ms_message("ice_check_list_perform_nominations(cl=%p): nominating the best valid pair for each component.",cl);
+			cl->nomination_delay_running = FALSE;
+			ice_check_list_nominate(cl, best_valid_list);
+		}else if (need_more_time && !cl->nomination_delay_running){
+			cl->nomination_delay_running = TRUE;
+			cl->nomination_delay_start_time = ice_current_time();
+		}
+	}
+	bctbx_list_free(best_valid_list);
 }
 
 static void ice_remove_waiting_and_frozen_pairs_from_list(bctbx_list_t **list, uint16_t componentID)
@@ -3449,7 +3652,7 @@ static void ice_conclude_waiting_frozen_and_inprogress_pairs(const IceValidCandi
 		bctbx_list_t *elem;
 		ice_remove_waiting_and_frozen_pairs_from_list(&cl->check_list, valid_pair->valid->local->componentID);
 		ice_remove_waiting_and_frozen_pairs_from_list(&cl->triggered_checks_queue, valid_pair->valid->local->componentID);
-		
+
 		for (elem = cl->check_list ; elem != NULL; elem = elem->next){
 			IceCandidatePair *pair = (IceCandidatePair*) elem->data;
 			if ((pair->state == ICP_InProgress) && (pair->local->componentID == valid_pair->valid->local->componentID)
@@ -3461,10 +3664,12 @@ static void ice_conclude_waiting_frozen_and_inprogress_pairs(const IceValidCandi
 	}
 }
 
+#if 0
 static int ice_find_use_candidate_valid_pair_from_componentID(const IceValidCandidatePair *valid_pair, const uint16_t *componentID)
 {
 	return !((valid_pair->generated_from->use_candidate == TRUE) && (valid_pair->generated_from->local->componentID == *componentID));
 }
+#endif
 
 static int ice_find_nominated_valid_pair_from_componentID(const IceValidCandidatePair *valid_pair, const uint16_t *componentID)
 {
@@ -3500,23 +3705,6 @@ static void ice_check_all_pairs_in_failed_or_succeeded_state(const IceCandidateP
 	if (elem != NULL) {
 		cb->result = FALSE;
 	}
-}
-
-static void ice_pair_stop_retransmissions(IceCandidatePair *pair, IceCheckList *cl)
-{
-	bctbx_list_t *elem;
-	if (pair->state == ICP_InProgress) {
-		ice_pair_set_state(pair, ICP_Failed);
-		elem = bctbx_list_find(cl->triggered_checks_queue, pair);
-		if (elem != NULL) {
-			cl->triggered_checks_queue = bctbx_list_erase_link(cl->triggered_checks_queue, elem);
-		}
-	}
-}
-
-static void ice_check_list_stop_retransmissions(IceCheckList *cl)
-{
-	bctbx_list_for_each2(cl->check_list, (void (*)(void*,void*))ice_pair_stop_retransmissions, cl);
 }
 
 static IceCheckList * ice_session_find_running_check_list(const IceSession *session)
@@ -3591,9 +3779,8 @@ static void ice_check_list_create_turn_channel(IceCheckList *cl, RtpTransport *r
 }
 
 /* Conclude ICE processing as defined in 8.1. */
-static void ice_conclude_processing(IceCheckList *cl, RtpSession *rtp_session)
+static void ice_conclude_processing(IceCheckList *cl, RtpSession *rtp_session, bool_t nomination_delay_expired)
 {
-	CheckList_RtpSession cr;
 	CheckList_Bool cb;
 	OrtpEvent *ev;
 	int nb_losing_pairs = 0;
@@ -3605,10 +3792,7 @@ static void ice_conclude_processing(IceCheckList *cl, RtpSession *rtp_session)
 
 	if (cl->state == ICL_Running) {
 		if (cl->session->role == IR_Controlling) {
-			/* Perform regular nomination for valid pairs. */
-			cr.cl = cl;
-			cr.rtp_session = rtp_session;
-			bctbx_list_for_each2(cl->valid_list, (void (*)(void*,void*))ice_perform_regular_nomination, &cr);
+			ice_check_list_perform_nominations(cl, nomination_delay_expired);
 		}
 
 		bctbx_list_for_each2(cl->valid_list, (void (*)(void*,void*))ice_conclude_waiting_frozen_and_inprogress_pairs, cl);
@@ -3621,9 +3805,11 @@ static void ice_conclude_processing(IceCheckList *cl, RtpSession *rtp_session)
 			if ((cl->state != ICL_Completed) && (nb_losing_pairs == 0)) {
 				bool_t result;
 				cl->state = ICL_Completed;
+				cl->nomination_in_progress = FALSE;
 				cl->nomination_delay_running = FALSE;
 				ice_check_list_select_candidates(cl);
 				ms_message("ice: Finished ICE check list [%p] processing successfully!",cl);
+				cl->connectivity_checks_running = FALSE;
 				ice_dump_valid_list(cl);
 				/* Initialise keepalive time. */
 				cl->keepalive_time = ice_current_time();
@@ -3631,7 +3817,9 @@ static void ice_conclude_processing(IceCheckList *cl, RtpSession *rtp_session)
 				if (cl->session->role == IR_Controlling) ice_check_list_stop_retransmissions(cl);
 				result = ice_check_list_selected_valid_remote_candidate(cl, &rtp_remote_candidate, &rtcp_remote_candidate);
 				if (result == TRUE) {
+					/*Switch the destination of the mediastream to the destination selected by ICE*/
 					rtp_session_set_remote_addr_full(rtp_session, rtp_remote_candidate->taddr.ip, rtp_remote_candidate->taddr.port, rtcp_remote_candidate->taddr.ip, rtcp_remote_candidate->taddr.port);
+
 					if (cl->session->turn_enabled) {
 						ice_check_list_selected_valid_local_candidate(cl, &rtp_local_candidate, &rtcp_local_candidate);
 						if (rtp_local_candidate) {
@@ -3670,6 +3858,7 @@ static void ice_conclude_processing(IceCheckList *cl, RtpSession *rtp_session)
 				if (cl->state != ICL_Failed) {
 					cl->state = ICL_Failed;
 					ms_message("ice: Failed ICE check list processing!");
+					cl->connectivity_checks_running = FALSE;
 					ice_dump_valid_list(cl);
 					/* Notify the application of the failed processing. */
 					ev = ortp_event_new(ORTP_EVENT_ICE_CHECK_LIST_PROCESSING_FINISHED);
@@ -3717,6 +3906,7 @@ static void ice_check_list_restart(IceCheckList *cl)
 	cl->gathering_finished = FALSE;
 	cl->nomination_delay_running = FALSE;
 	cl->ta_time = ice_current_time();
+	cl->nomination_in_progress = FALSE;
 	memset(&cl->keepalive_time, 0, sizeof(cl->keepalive_time));
 	memset(&cl->gathering_start_time, 0, sizeof(cl->gathering_start_time));
 	memset(&cl->nomination_delay_start_time, 0, sizeof(cl->nomination_delay_start_time));
@@ -3772,7 +3962,18 @@ static int ice_find_gathering_stun_server_request(const IceStunServerRequest *re
 static void ice_remove_gathering_stun_server_requests(IceCheckList *cl) {
 	bctbx_list_t *elem = cl->stun_server_requests;
 	while (elem != NULL) {
+		/* FIXME: Temporary workaround for -Wcast-function-type. */
+		#if __GNUC__ >= 8
+			_Pragma("GCC diagnostic push")
+			_Pragma("GCC diagnostic ignored \"-Wcast-function-type\"")
+		#endif // if __GNUC__ >= 8
+
 		elem = bctbx_list_find_custom(cl->stun_server_requests, (bctbx_compare_func)ice_find_gathering_stun_server_request, NULL);
+
+		#if __GNUC__ >= 8
+			_Pragma("GCC diagnostic pop")
+		#endif // if __GNUC__ >= 8
+
 		if (elem != NULL) {
 			IceStunServerRequest *request = (IceStunServerRequest *)elem->data;
 			ice_stun_server_request_free(request);
@@ -3838,6 +4039,7 @@ static void ice_send_stun_server_requests(IceStunServerRequest *request, IceChec
 
 static void ice_handle_connectivity_check_retransmission(IceCandidatePair *pair, const CheckList_RtpSession_Time *params)
 {
+	if (params->cl->nomination_in_progress && pair->use_candidate == FALSE) return; /*no need to retransmit anything during nomination*/
 	if ((pair->state == ICP_InProgress) && (ice_compare_time(params->time, pair->transmission_time) >= pair->rto)) {
 		ice_send_binding_request(params->cl, pair, params->rtp_session);
 	}
@@ -3891,7 +4093,18 @@ void ice_check_list_process(IceCheckList *cl, RtpSession *rtp_session)
 
 	/* Send STUN/TURN server requests (to gather candidates, create/refresh TURN permissions, refresh TURN allocations or bind TURN channels). */
 	bctbx_list_for_each2(cl->stun_server_requests, (void (*)(void*,void*))ice_send_stun_server_requests, cl);
+
+	/* FIXME: Temporary workaround for -Wcast-function-type. */
+	#if __GNUC__ >= 8
+		_Pragma("GCC diagnostic push")
+		_Pragma("GCC diagnostic ignored \"-Wcast-function-type\"")
+	#endif // if __GNUC__ >= 8
+
 	cl->stun_server_requests = bctbx_list_remove_custom(cl->stun_server_requests, (bctbx_compare_func)ice_compare_stun_server_requests_to_remove, NULL);
+
+	#if __GNUC__ >= 8
+		_Pragma("GCC diagnostic pop")
+	#endif // if __GNUC__ >= 8
 
 	/* Send event if needed. */
 	if ((cl->session->send_event == TRUE) && (ice_compare_time(curtime, cl->session->event_time) >= 0)) {
@@ -3906,7 +4119,7 @@ void ice_check_list_process(IceCheckList *cl, RtpSession *rtp_session)
 
 	switch (cl->state) {
 		case ICL_Completed:
-			/* Handle keepalive. */
+			/* Handle keepalives when check list has completed - long periods */
 			if (ice_compare_time(curtime, cl->keepalive_time) >= (cl->session->keepalive_timeout * 1000)) {
 				ice_send_keepalive_packets(cl, rtp_session);
 				cl->keepalive_time = curtime;
@@ -3919,10 +4132,25 @@ void ice_check_list_process(IceCheckList *cl, RtpSession *rtp_session)
 			if (ice_check_list_send_triggered_check(cl, rtp_session) != NULL) return;
 			break;
 		case ICL_Running:
+			/* Handle keepalives when check list is running, sent only on succeeded pair, to keep them alive until we conclude. */
+			ice_send_keepalive_packets(cl, rtp_session);
+#if 0
+			/* Workaround to stop ICE if it has not finished after 5 seconds. */
+			/* TODO: To remove */
+
+			if ((cl->session->role == IR_Controlling) && cl->connectivity_checks_running && (ice_session_connectivity_checks_duration(cl->session) >= 5000)) {
+				OrtpEvent *ev = ortp_event_new(ORTP_EVENT_ICE_DEACTIVATION_NEEDED);
+				ortp_event_get_data(ev)->info.ice_processing_successful = FALSE;
+				ms_warning("ice: Connectivity checks not terminated, deactivate ICE");
+				rtp_session_dispatch_event(rtp_session, ev);
+				cl->connectivity_checks_running = FALSE;
+				return;
+			}
+#endif
 			/* Check nomination delay. */
 			if ((cl->nomination_delay_running == TRUE) && (ice_compare_time(curtime, cl->nomination_delay_start_time) >= ICE_NOMINATION_DELAY)) {
 				ms_message("ice: Nomination delay timeout, select the potential relayed candidate anyway.");
-				ice_conclude_processing(cl, rtp_session);
+				ice_conclude_processing(cl, rtp_session, TRUE);
 				if (cl->session->state == IS_Completed) return;
 			}
 			/* Check if some retransmissions are needed. */
@@ -3958,7 +4186,7 @@ void ice_check_list_process(IceCheckList *cl, RtpSession *rtp_session)
 				bctbx_list_for_each2(cl->check_list, (void (*)(void*,void*))ice_check_retransmissions_pending, &retransmissions_pending);
 				if (retransmissions_pending == FALSE) {
 					ms_message("ice: There is no connectivity check left to be sent and no retransmissions pending, concluding checklist [%p]",cl);
-					ice_conclude_processing(cl, rtp_session);
+					ice_conclude_processing(cl, rtp_session, FALSE);
 				}
 			}
 			break;

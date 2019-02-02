@@ -1,0 +1,235 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.XIB" version="3.0" toolsVersion="13771" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES">
+    <device id="retina4_0" orientation="portrait">
+        <adaptation id="fullscreen"/>
+    </device>
+    <dependencies>
+        <deployment identifier="iOS"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="13772"/>
+        <capability name="Safe area layout guides" minToolsVersion="9.0"/>
+        <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
+    </dependencies>
+    <objects>
+        <placeholder placeholderIdentifier="IBFilesOwner" id="-1" userLabel="File's Owner" customClass="VerifyView">
+            <connections>
+                <outlet property="activityIndicator" destination="gjf-Z6-PPq" id="U5B-yg-2Fc"/>
+                <outlet property="backButton" destination="LUg-4O-8wR" id="pXI-i9-x4n"/>
+                <outlet property="phoneNumberField" destination="uk4-Se-nJB" id="Wxc-7J-T13"/>
+                <outlet property="sendButton" destination="ahl-p7-8G0" id="9FC-vX-ew1"/>
+                <outlet property="view" destination="i5M-Pr-FkT" id="sfx-zR-JGt"/>
+            </connections>
+        </placeholder>
+        <placeholder placeholderIdentifier="IBFirstResponder" id="-2" customClass="UIResponder"/>
+        <view clearsContextBeforeDrawing="NO" contentMode="scaleToFill" id="i5M-Pr-FkT">
+            <rect key="frame" x="0.0" y="0.0" width="320" height="568"/>
+            <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+            <subviews>
+                <stackView opaque="NO" contentMode="scaleToFill" axis="vertical" translatesAutoresizingMaskIntoConstraints="NO" id="ajJ-AR-8tg">
+                    <rect key="frame" x="0.0" y="20" width="320" height="548"/>
+                    <subviews>
+                        <scrollView clipsSubviews="YES" multipleTouchEnabled="YES" contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="LX8-PT-ioF" customClass="TPKeyboardAvoidingScrollView">
+                            <rect key="frame" x="0.0" y="0.0" width="320" height="548"/>
+                            <subviews>
+                                <view contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="PqL-Zi-wHP">
+                                    <rect key="frame" x="0.0" y="0.0" width="320" height="548"/>
+                                    <subviews>
+                                        <imageView userInteractionEnabled="NO" contentMode="scaleToFill" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="LauncherIcon_default.png" translatesAutoresizingMaskIntoConstraints="NO" id="dad-n3-XR7">
+                                            <rect key="frame" x="50" y="20" width="90" height="90.5"/>
+                                            <constraints>
+                                                <constraint firstAttribute="width" constant="90" id="Bym-os-2SQ"/>
+                                                <constraint firstAttribute="height" constant="90" id="TnO-3I-bDg"/>
+                                            </constraints>
+                                        </imageView>
+                                        <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="Verify" textAlignment="natural" lineBreakMode="tailTruncation" numberOfLines="2" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="A3H-Lw-aWa">
+                                            <rect key="frame" x="150" y="42" width="109" height="48"/>
+                                            <fontDescription key="fontDescription" type="boldSystem" pointSize="40"/>
+                                            <nil key="textColor"/>
+                                            <nil key="highlightedColor"/>
+                                        </label>
+                                        <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" usesAttributedText="YES" lineBreakMode="tailTruncation" numberOfLines="6" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="FTm-X9-LeW">
+                                            <rect key="frame" x="50" y="150" width="220" height="98.5"/>
+                                            <attributedString key="attributedText">
+                                                <fragment content="Enter 10-digit iPhone">
+                                                    <attributes>
+                                                        <font key="NSFont" size="16" name="ArialMT"/>
+                                                        <paragraphStyle key="NSParagraphStyle" alignment="left" lineBreakMode="wordWrapping" baseWritingDirection="natural" tighteningFactorForTruncation="0.0"/>
+                                                    </attributes>
+                                                </fragment>
+                                                <fragment content=" ">
+                                                    <attributes>
+                                                        <font key="NSFont" size="16" name="ArialMT"/>
+                                                        <font key="NSOriginalFont" size="16" name="ArialMT"/>
+                                                        <paragraphStyle key="NSParagraphStyle" alignment="left" lineBreakMode="wordWrapping" baseWritingDirection="natural" tighteningFactorForTruncation="0.0"/>
+                                                    </attributes>
+                                                </fragment>
+                                                <fragment content="number (US or Canada only)">
+                                                    <attributes>
+                                                        <font key="NSFont" size="16" name="ArialMT"/>
+                                                        <paragraphStyle key="NSParagraphStyle" alignment="left" lineBreakMode="wordWrapping" baseWritingDirection="natural" tighteningFactorForTruncation="0.0"/>
+                                                    </attributes>
+                                                </fragment>
+                                                <fragment content=" -">
+                                                    <attributes>
+                                                        <font key="NSFont" size="16" name="ArialMT"/>
+                                                        <font key="NSOriginalFont" size="16" name="ArialMT"/>
+                                                        <paragraphStyle key="NSParagraphStyle" alignment="left" lineBreakMode="wordWrapping" baseWritingDirection="natural" tighteningFactorForTruncation="0.0"/>
+                                                    </attributes>
+                                                </fragment>
+                                                <fragment content=" Your ">
+                                                    <attributes>
+                                                        <font key="NSFont" size="14" name="ArialMT"/>
+                                                        <font key="NSOriginalFont" size="14" name="ArialMT"/>
+                                                        <paragraphStyle key="NSParagraphStyle" alignment="left" lineBreakMode="wordWrapping" baseWritingDirection="natural" tighteningFactorForTruncation="0.0"/>
+                                                    </attributes>
+                                                </fragment>
+                                                <fragment content="ONE-Phone ">
+                                                    <attributes>
+                                                        <font key="NSFont" size="14" name="Arial-ItalicMT"/>
+                                                        <font key="NSOriginalFont" size="14" name="Arial-BoldItalicMT"/>
+                                                        <paragraphStyle key="NSParagraphStyle" alignment="left" lineBreakMode="wordWrapping" baseWritingDirection="natural" tighteningFactorForTruncation="0.0"/>
+                                                    </attributes>
+                                                </fragment>
+                                                <fragment content="number will be linked to ">
+                                                    <attributes>
+                                                        <font key="NSFont" size="14" name="ArialMT"/>
+                                                        <font key="NSOriginalFont" size="14" name="ArialMT"/>
+                                                        <paragraphStyle key="NSParagraphStyle" alignment="left" lineBreakMode="wordWrapping" baseWritingDirection="natural" tighteningFactorForTruncation="0.0"/>
+                                                    </attributes>
+                                                </fragment>
+                                                <fragment content="your iPhone">
+                                                    <attributes>
+                                                        <font key="NSFont" size="14" name="ArialMT"/>
+                                                        <paragraphStyle key="NSParagraphStyle" alignment="left" lineBreakMode="wordWrapping" baseWritingDirection="natural" tighteningFactorForTruncation="0.0"/>
+                                                    </attributes>
+                                                </fragment>
+                                                <fragment content=" number">
+                                                    <attributes>
+                                                        <font key="NSFont" size="14" name="ArialMT"/>
+                                                        <font key="NSOriginalFont" size="14" name="ArialMT"/>
+                                                        <paragraphStyle key="NSParagraphStyle" alignment="left" lineBreakMode="wordWrapping" baseWritingDirection="natural" tighteningFactorForTruncation="0.0"/>
+                                                    </attributes>
+                                                </fragment>
+                                                <fragment content=",">
+                                                    <attributes>
+                                                        <font key="NSFont" size="14" name="ArialMT"/>
+                                                        <paragraphStyle key="NSParagraphStyle" alignment="left" lineBreakMode="wordWrapping" baseWritingDirection="natural" tighteningFactorForTruncation="0.0"/>
+                                                    </attributes>
+                                                </fragment>
+                                                <fragment content=" and ">
+                                                    <attributes>
+                                                        <font key="NSFont" size="14" name="ArialMT"/>
+                                                        <font key="NSOriginalFont" size="14" name="ArialMT"/>
+                                                        <paragraphStyle key="NSParagraphStyle" alignment="left" lineBreakMode="wordWrapping" baseWritingDirection="natural" tighteningFactorForTruncation="0.0"/>
+                                                    </attributes>
+                                                </fragment>
+                                                <fragment content="ONE-Phone">
+                                                    <attributes>
+                                                        <font key="NSFont" size="14" name="Arial-ItalicMT"/>
+                                                        <font key="NSOriginalFont" size="14" name="Arial-ItalicMT"/>
+                                                        <paragraphStyle key="NSParagraphStyle" alignment="left" lineBreakMode="wordWrapping" baseWritingDirection="natural" tighteningFactorForTruncation="0.0"/>
+                                                    </attributes>
+                                                </fragment>
+                                                <fragment content=" calls will use the same network">
+                                                    <attributes>
+                                                        <font key="NSFont" size="14" name="ArialMT"/>
+                                                        <font key="NSOriginalFont" size="14" name="ArialMT"/>
+                                                        <paragraphStyle key="NSParagraphStyle" alignment="left" lineBreakMode="wordWrapping" baseWritingDirection="natural" tighteningFactorForTruncation="0.0"/>
+                                                    </attributes>
+                                                </fragment>
+                                            </attributedString>
+                                            <nil key="highlightedColor"/>
+                                        </label>
+                                        <textField opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="left" contentVerticalAlignment="center" borderStyle="roundedRect" textAlignment="natural" minimumFontSize="17" translatesAutoresizingMaskIntoConstraints="NO" id="uk4-Se-nJB">
+                                            <rect key="frame" x="76.5" y="268" width="193.5" height="30"/>
+                                            <nil key="textColor"/>
+                                            <fontDescription key="fontDescription" type="system" pointSize="14"/>
+                                            <textInputTraits key="textInputTraits" keyboardType="phonePad" returnKeyType="go"/>
+                                        </textField>
+                                        <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="+1" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="HO3-eS-WVi">
+                                            <rect key="frame" x="50" y="268" width="21.5" height="26"/>
+                                            <constraints>
+                                                <constraint firstAttribute="height" constant="26" id="yA2-Dg-CLk"/>
+                                            </constraints>
+                                            <fontDescription key="fontDescription" type="system" pointSize="20"/>
+                                            <nil key="textColor"/>
+                                            <nil key="highlightedColor"/>
+                                        </label>
+                                        <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="roundedRect" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="LUg-4O-8wR">
+                                            <rect key="frame" x="50" y="418" width="61" height="39"/>
+                                            <fontDescription key="fontDescription" type="boldSystem" pointSize="22"/>
+                                            <state key="normal" title="BACK"/>
+                                            <connections>
+                                                <action selector="backButtonClick:" destination="-1" eventType="touchUpInside" id="y1R-cr-3Dl"/>
+                                            </connections>
+                                        </button>
+                                        <button opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="roundedRect" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="ahl-p7-8G0">
+                                            <rect key="frame" x="144" y="418" width="126" height="39"/>
+                                            <fontDescription key="fontDescription" type="boldSystem" pointSize="22"/>
+                                            <state key="normal" title="SEND CODE"/>
+                                            <connections>
+                                                <action selector="sendButtonClick:" destination="-1" eventType="touchUpInside" id="BOH-x5-aEm"/>
+                                            </connections>
+                                        </button>
+                                        <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="(We will text a verification code to this phone number)" textAlignment="natural" lineBreakMode="tailTruncation" numberOfLines="2" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="Fbd-69-esv">
+                                            <rect key="frame" x="40" y="308" width="240" height="36"/>
+                                            <fontDescription key="fontDescription" type="system" pointSize="15"/>
+                                            <nil key="textColor"/>
+                                            <nil key="highlightedColor"/>
+                                        </label>
+                                        <activityIndicatorView hidden="YES" opaque="NO" contentMode="scaleToFill" horizontalHuggingPriority="750" verticalHuggingPriority="750" hidesWhenStopped="YES" style="whiteLarge" translatesAutoresizingMaskIntoConstraints="NO" id="gjf-Z6-PPq">
+                                            <rect key="frame" x="142" y="361" width="37" height="37"/>
+                                            <color key="color" red="1" green="0.0" blue="0.0" alpha="1" colorSpace="calibratedRGB"/>
+                                        </activityIndicatorView>
+                                    </subviews>
+                                    <color key="backgroundColor" white="1" alpha="1" colorSpace="calibratedWhite"/>
+                                    <constraints>
+                                        <constraint firstItem="LUg-4O-8wR" firstAttribute="leading" secondItem="PqL-Zi-wHP" secondAttribute="leading" constant="50" id="0Wb-5Q-uIQ"/>
+                                        <constraint firstItem="uk4-Se-nJB" firstAttribute="leading" secondItem="HO3-eS-WVi" secondAttribute="trailing" constant="5" id="92o-mJ-2tv"/>
+                                        <constraint firstItem="FTm-X9-LeW" firstAttribute="leading" secondItem="PqL-Zi-wHP" secondAttribute="leading" constant="50" id="9M1-e4-Fuu"/>
+                                        <constraint firstItem="uk4-Se-nJB" firstAttribute="top" secondItem="FTm-X9-LeW" secondAttribute="bottom" constant="20" id="Cec-hS-ghd"/>
+                                        <constraint firstItem="dad-n3-XR7" firstAttribute="top" secondItem="PqL-Zi-wHP" secondAttribute="top" constant="20" id="FhA-Ab-t4Z"/>
+                                        <constraint firstItem="FTm-X9-LeW" firstAttribute="top" secondItem="A3H-Lw-aWa" secondAttribute="bottom" constant="60" id="I0p-R0-eIJ"/>
+                                        <constraint firstItem="dad-n3-XR7" firstAttribute="leading" secondItem="PqL-Zi-wHP" secondAttribute="leading" constant="50" id="MmY-2U-FBM"/>
+                                        <constraint firstItem="Fbd-69-esv" firstAttribute="leading" secondItem="PqL-Zi-wHP" secondAttribute="leading" constant="40" id="PWd-Sd-iFI"/>
+                                        <constraint firstAttribute="trailing" secondItem="Fbd-69-esv" secondAttribute="trailing" constant="40" id="Pc2-x2-P2z"/>
+                                        <constraint firstItem="gjf-Z6-PPq" firstAttribute="centerX" secondItem="PqL-Zi-wHP" secondAttribute="centerX" id="Vj7-fY-z2D"/>
+                                        <constraint firstItem="HO3-eS-WVi" firstAttribute="leading" secondItem="PqL-Zi-wHP" secondAttribute="leading" constant="50" id="WpU-jW-IgN"/>
+                                        <constraint firstItem="A3H-Lw-aWa" firstAttribute="leading" secondItem="dad-n3-XR7" secondAttribute="trailing" constant="10" id="XoO-cJ-uft"/>
+                                        <constraint firstItem="LUg-4O-8wR" firstAttribute="top" secondItem="uk4-Se-nJB" secondAttribute="bottom" constant="120" id="aEH-7q-pGA"/>
+                                        <constraint firstItem="A3H-Lw-aWa" firstAttribute="centerY" secondItem="dad-n3-XR7" secondAttribute="centerY" id="aVS-da-6Q4"/>
+                                        <constraint firstItem="HO3-eS-WVi" firstAttribute="top" secondItem="FTm-X9-LeW" secondAttribute="bottom" constant="20" id="aq2-gg-rJn"/>
+                                        <constraint firstItem="LUg-4O-8wR" firstAttribute="centerY" secondItem="ahl-p7-8G0" secondAttribute="centerY" id="dna-Yv-J2Z"/>
+                                        <constraint firstAttribute="trailing" secondItem="ahl-p7-8G0" secondAttribute="trailing" constant="50" id="fBB-Ay-CuI"/>
+                                        <constraint firstItem="ahl-p7-8G0" firstAttribute="top" secondItem="gjf-Z6-PPq" secondAttribute="bottom" constant="20" id="fDO-Z0-Sdg"/>
+                                        <constraint firstItem="Fbd-69-esv" firstAttribute="top" secondItem="uk4-Se-nJB" secondAttribute="bottom" constant="10" id="h1N-Zl-RAJ"/>
+                                        <constraint firstAttribute="trailing" secondItem="FTm-X9-LeW" secondAttribute="trailing" constant="50" id="uCD-Rk-ril"/>
+                                        <constraint firstAttribute="trailing" secondItem="uk4-Se-nJB" secondAttribute="trailing" constant="50" id="wcJ-P9-c8a"/>
+                                    </constraints>
+                                </view>
+                            </subviews>
+                            <constraints>
+                                <constraint firstAttribute="bottom" secondItem="PqL-Zi-wHP" secondAttribute="bottom" id="8ze-zH-sfk"/>
+                                <constraint firstItem="PqL-Zi-wHP" firstAttribute="top" secondItem="LX8-PT-ioF" secondAttribute="top" id="Ijn-Hg-ffB"/>
+                                <constraint firstItem="PqL-Zi-wHP" firstAttribute="height" secondItem="LX8-PT-ioF" secondAttribute="height" id="fzN-iP-Cdy"/>
+                                <constraint firstAttribute="trailing" secondItem="PqL-Zi-wHP" secondAttribute="trailing" id="gvm-p4-6T1"/>
+                                <constraint firstItem="PqL-Zi-wHP" firstAttribute="leading" secondItem="LX8-PT-ioF" secondAttribute="leading" id="u79-8H-jaX"/>
+                                <constraint firstItem="PqL-Zi-wHP" firstAttribute="width" secondItem="LX8-PT-ioF" secondAttribute="width" id="yGa-dQ-Nze"/>
+                            </constraints>
+                        </scrollView>
+                    </subviews>
+                </stackView>
+            </subviews>
+            <color key="backgroundColor" red="1" green="1" blue="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+            <constraints>
+                <constraint firstItem="Q5M-cg-NOt" firstAttribute="trailing" secondItem="ajJ-AR-8tg" secondAttribute="trailing" id="WPa-mw-ict"/>
+                <constraint firstItem="ajJ-AR-8tg" firstAttribute="top" secondItem="Q5M-cg-NOt" secondAttribute="top" id="Xp7-wq-yzX"/>
+                <constraint firstItem="ajJ-AR-8tg" firstAttribute="leading" secondItem="Q5M-cg-NOt" secondAttribute="leading" id="m3l-as-gs8"/>
+                <constraint firstItem="Q5M-cg-NOt" firstAttribute="bottom" secondItem="ajJ-AR-8tg" secondAttribute="bottom" id="yga-Gi-px3"/>
+            </constraints>
+            <viewLayoutGuide key="safeArea" id="Q5M-cg-NOt"/>
+        </view>
+    </objects>
+    <resources>
+        <image name="LauncherIcon_default.png" width="76" height="76"/>
+    </resources>
+</document>

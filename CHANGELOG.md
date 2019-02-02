@@ -10,6 +10,31 @@ Group changes to describe their impact on the project, as follows:
     Fixed for any bug fixes.
     Security to invite users to upgrade in case of vulnerabilities.
 
+## [4.0] - 2018-06-11
+
+### Added
+- Supports of group chat
+- New address search algorithm
+
+### Fixed
+- Minor bugs fixes
+
+## [3.16.5] - 2017-11-28
+
+### Added
+- Support of IOS 11
+- new algorithm to adapt audio and video codec bitrates to the available bandwidth (https://wiki.linphone.org/xwiki/wiki/public/view/FAQ/How%20does%20adaptive%20bitrate%20algorithm%20work%20%3F/)
+
+### Changed
+- Contact, CNContact implmentation.
+- Contacts loading optimization.
+- Sound management updated
+
+### Fixed
+- Chat file resend fixed
+- Minor bugs fixes
+- Audio fixed on conference call
+
 ## [3.16.3] - 2017-05-03
 
 ### Added

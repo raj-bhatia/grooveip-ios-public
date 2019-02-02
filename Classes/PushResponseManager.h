@@ -27,6 +27,7 @@
 - (void)pushResponseManagerWithUserId: (NSString *) userId
 								token: (NSString *) token
 							   callId: (NSString *) callId
+								route: (NSString *) route
 						   completion: (void (^)(GenericResponse *genericResponse, int *status)) completionHandler;
 
 + (PushResponseManager *) instance;

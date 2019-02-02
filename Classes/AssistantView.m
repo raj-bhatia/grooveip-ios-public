@@ -102,6 +102,12 @@ static UICompositeViewDescription *compositeDescription = nil;
 										   selector:@selector(configuringUpdate:)
 											   name:kLinphoneConfiguringStateUpdate
 											 object:nil];
+	if (!account_creator) {
+		account_creator = linphone_account_creator_new(
+			LC,
+			[LinphoneManager.instance lpConfigStringForKey:@"xmlrpc_url" inSection:@"assistant" withDefault:@""]
+				.UTF8String);
+	}
 
 	if (!mustRestoreView) {
 		new_config = NULL;
@@ -406,10 +412,9 @@ static UICompositeViewDescription *compositeDescription = nil;
 		linphone_core_set_default_proxy_config(LC, new_config);
 		// reload address book to prepend proxy config domain to contacts' phone number
 		// todo: STOP doing that!
-		[[LinphoneManager.instance fastAddressBook] reload];
-	} else {
+		[[LinphoneManager.instance fastAddressBook] fetchContactsInBackGroundThread];
+	} else
 		[self displayAssistantConfigurationError];
-	}
 }
 
 - (void)displayAssistantConfigurationError {
@@ -443,12 +448,14 @@ static UICompositeViewDescription *compositeDescription = nil;
 		BOOL show_logo = [LinphoneManager.instance lpConfigBoolForKey:@"show_assistant_logo_in_choice_view_preference"];
 		BOOL show_extern = ![LinphoneManager.instance lpConfigBoolForKey:@"hide_assistant_custom_account"];
 		BOOL show_new = ![LinphoneManager.instance lpConfigBoolForKey:@"hide_assistant_create_account"];
-
+		BOOL show_fetch_remote = ![LinphoneManager.instance lpConfigBoolForKey:@"show_remote_provisioning_in_assistant"];
+		
 		if (!placement_done) {
 			// visibility
 			_welcomeLogoImage.hidden = !show_logo;
 			_gotoLoginButton.hidden = !show_extern;
 			_gotoCreateAccountButton.hidden = !show_new;
+			_gotoRemoteProvisioningButton.hidden = !show_fetch_remote;
 
 			// placement
 			if (show_logo && show_new && !show_extern) {
@@ -540,7 +547,6 @@ static UICompositeViewDescription *compositeDescription = nil;
 
 	// every UITextField subviews with phone keyboard must be tweaked to have a done button
 	[self addDoneButtonRecursivelyInView:self.view];
-
 	[self prepareErrorLabels];
 }
 
@@ -705,10 +711,13 @@ static UICompositeViewDescription *compositeDescription = nil;
 	UIAssistantTextField *domain = [self findTextField:ViewElement_Domain];
 	[domain showError:[AssistantView errorForLinphoneAccountCreatorDomainStatus:LinphoneAccountCreatorDomainInvalid]
 				 when:^BOOL(NSString *inputEntry) {
-				   LinphoneAccountCreatorDomainStatus s =
-					   linphone_account_creator_set_domain(account_creator, inputEntry.UTF8String);
-				   domain.errorLabel.text = [AssistantView errorForLinphoneAccountCreatorDomainStatus:s];
-				   return s != LinphoneAccountCreatorDomainOk;
+				   if (![inputEntry isEqualToString:@""]) {
+					   LinphoneAccountCreatorDomainStatus s =
+						   linphone_account_creator_set_domain(account_creator, inputEntry.UTF8String);
+					   domain.errorLabel.text = [AssistantView errorForLinphoneAccountCreatorDomainStatus:s];
+					   return s != LinphoneAccountCreatorDomainOk;
+				   }
+				   return true;
 				 }];
 
 	UIAssistantTextField *url = [self findTextField:ViewElement_URL];
@@ -934,14 +943,14 @@ static UICompositeViewDescription *compositeDescription = nil;
 					  NSString *tmp_phone =
 						  [NSString stringWithUTF8String:linphone_account_creator_get_phone_number(account_creator)];
 					  int ccc = -1;
-					  LinphoneDialPlan dialplan = {0};
+					  const LinphoneDialPlan *dialplan = NULL;
 					  char *nationnal_significant_number = NULL;
 					  ccc = linphone_dial_plan_lookup_ccc_from_e164(tmp_phone.UTF8String);
 					  if (ccc > -1) { /*e164 like phone number*/
-						  dialplan = *linphone_dial_plan_by_ccc_as_int(ccc);
-						  nationnal_significant_number = strstr(tmp_phone.UTF8String, dialplan.ccc);
+						  dialplan = linphone_dial_plan_by_ccc_as_int(ccc);
+						  nationnal_significant_number = strstr(tmp_phone.UTF8String, linphone_dial_plan_get_country_calling_code(dialplan));
 						  if (nationnal_significant_number) {
-							  nationnal_significant_number += strlen(dialplan.ccc);
+							  nationnal_significant_number += strlen(linphone_dial_plan_get_country_calling_code(dialplan));
 						  }
 					  }
 					  [self changeView:_linphoneLoginView back:FALSE animation:TRUE];
@@ -963,15 +972,15 @@ static UICompositeViewDescription *compositeDescription = nil;
 											  ofType:[UITextField class]])
 						  .text = @"";
 					  linphone_account_creator_set_activation_code(account_creator, "");
-					  if (dialplan.iso_country_code) {
+					  if (linphone_dial_plan_get_iso_country_code(dialplan)) {
 						  NSDictionary *country = [CountryListView
-							  countryWithIso:[NSString stringWithUTF8String:dialplan.iso_country_code]];
+							  countryWithIso:[NSString stringWithUTF8String:linphone_dial_plan_get_iso_country_code(dialplan)]];
 						  [self didSelectCountry:country];
 					  }
 					  // Reset phone number in account_creator to be sure to let the user retry
 					  if (nationnal_significant_number) {
 						  linphone_account_creator_set_phone_number(account_creator, nationnal_significant_number,
-																	dialplan.ccc);
+																	linphone_dial_plan_get_country_calling_code(dialplan));
 					  }
 					}];
 
@@ -1125,7 +1134,7 @@ void assistant_is_account_activated(LinphoneAccountCreator *creator, LinphoneAcc
 				linphone_account_creator_recover_account(creator);
 			}
 		} else {
-			// TO DO : Re send email ?
+			// TODO : Re send email ?
 			[thiz showErrorPopup:"ERROR_ACCOUNT_ALREADY_IN_USE"];
 			[thiz findButton:ViewElement_NextButton].enabled = NO;
 		}
@@ -1315,8 +1324,11 @@ void assistant_is_account_linked(LinphoneAccountCreator *creator, LinphoneAccoun
 		NSString *displayName = [self findTextField:ViewElement_DisplayName].text;
 		NSString *pwd = [self findTextField:ViewElement_Password].text;
 		LinphoneProxyConfig *config = linphone_core_create_proxy_config(LC);
-		LinphoneAddress *addr =
-			linphone_address_new([NSString stringWithFormat:@"sip:%@@%@", username, domain].UTF8String);
+		LinphoneAddress *addr = linphone_address_new(NULL);
+		LinphoneAddress *tmpAddr = linphone_address_new([NSString stringWithFormat:@"sip:%@",domain].UTF8String);
+		linphone_address_set_username(addr, username.UTF8String);
+		linphone_address_set_port(addr, linphone_address_get_port(tmpAddr));
+		linphone_address_set_domain(addr, linphone_address_get_domain(tmpAddr));
 		if (displayName && ![displayName isEqualToString:@""]) {
 			linphone_address_set_display_name(addr, displayName.UTF8String);
 		}
@@ -1350,6 +1362,7 @@ void assistant_is_account_linked(LinphoneAccountCreator *creator, LinphoneAccoun
 								   );
 		linphone_core_add_auth_info(LC, info);
 		linphone_address_unref(addr);
+		linphone_address_unref(tmpAddr);
 
 		if (config) {
 			[[LinphoneManager instance] configurePushTokenForProxyConfig:config];
@@ -1357,13 +1370,13 @@ void assistant_is_account_linked(LinphoneAccountCreator *creator, LinphoneAccoun
 				linphone_core_set_default_proxy_config(LC, config);
 				// reload address book to prepend proxy config domain to contacts' phone number
 				// todo: STOP doing that!
-				[[LinphoneManager.instance fastAddressBook] reload];
-				[PhoneMainView.instance changeCurrentView:DialerView.compositeViewDescription];
+				[[LinphoneManager.instance fastAddressBook] fetchContactsInBackGroundThread];
+                [PhoneMainView.instance changeCurrentView:DialerView.compositeViewDescription];
 			} else {
-				[self displayAssistantConfigurationError];
+			  [self displayAssistantConfigurationError];
 			}
 		} else {
-			[self displayAssistantConfigurationError];
+		  [self displayAssistantConfigurationError];
 		}
 	});
 }

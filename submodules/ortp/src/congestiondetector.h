@@ -23,6 +23,7 @@
 
 #include <ortp/port.h>
 #include <ortp/utils.h>
+#include <bctoolbox/list.h>
 struct _JitterControl;
 
 typedef enum _OrtpCongestionState {

@@ -27,12 +27,32 @@ set(BCTOOLBOX_C_SOURCE_FILES
 	vfs.c
 	vconnect.c
 	parser.c
+	crypto/crypto.c
 )
 
-set(BCTOOLBOX_CXX_SOURCE_FILES containers/map.cc)
+set(BCTOOLBOX_CXX_SOURCE_FILES
+	containers/map.cc
+	conversion/charconv.cc
+	crypto/ecc.cc
+	utils/regex.cc
+)
 
+set(BCTOOLBOX_OBJC_SOURCE_FILES)
+if (APPLE)
+	list(APPEND BCTOOLBOX_OBJC_SOURCE_FILES conversion/charconv_apple.mm)
+elseif (ANDROID)
+	list(APPEND BCTOOLBOX_CXX_SOURCE_FILES conversion/charconv_android.cc)
+elseif (WIN32)
+	list(APPEND BCTOOLBOX_CXX_SOURCE_FILES conversion/charconv_windows.cc)
+elseif (UNIX)
+	list(APPEND BCTOOLBOX_CXX_SOURCE_FILES conversion/charconv_linux.cc)
+endif ()
 
-if(HAVE_EXECINFO) 
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+	list(APPEND STRICT_OPTIONS_CXX "-x c++")
+endif()
+
+if(HAVE_EXECINFO)
 	list(APPEND BCTOOLBOX_CXX_SOURCE_FILES utils/exception.cc)
 endif()
 
@@ -50,16 +70,20 @@ if(BCUNIT_FOUND)
 	set(BCTOOLBOX_C_TESTER_SOURCE_FILES tester.c)
 endif()
 
-set(BCTOOLBOX_SOURCE_FILES ${BCTOOLBOX_C_SOURCE_FILES} ${BCTOOLBOX_CXX_SOURCE_FILES})
+set(BCTOOLBOX_SOURCE_FILES ${BCTOOLBOX_C_SOURCE_FILES} ${BCTOOLBOX_CXX_SOURCE_FILES} ${BCTOOLBOX_OBJC_SOURCE_FILES})
 set(BCTOOLBOX_TESTER_SOURCE_FILES ${BCTOOLBOX_C_TESTER_SOURCE_FILES})
 
 bc_apply_compile_flags(BCTOOLBOX_C_SOURCE_FILES STRICT_OPTIONS_CPP STRICT_OPTIONS_C)
 bc_apply_compile_flags(BCTOOLBOX_C_TESTER_SOURCE_FILES STRICT_OPTIONS_CPP STRICT_OPTIONS_C)
 bc_apply_compile_flags(BCTOOLBOX_CXX_SOURCE_FILES STRICT_OPTIONS_CPP STRICT_OPTIONS_CXX)
+bc_apply_compile_flags(BCTOOLBOX_OBJC_SOURCE_FILES STRICT_OPTIONS_CPP STRICT_OPTIONS_OBJC)
 
 if(ENABLE_STATIC)
 	add_library(bctoolbox-static STATIC ${BCTOOLBOX_SOURCE_FILES} ${BCTOOLBOX_HEADER_FILES})
 	target_link_libraries(bctoolbox-static INTERFACE ${CMAKE_THREAD_LIBS_INIT})
+	if(APPLE)
+		target_link_libraries(bctoolbox-static INTERFACE "-framework Foundation" "-framework AVFoundation")
+	endif()
 	if(WIN32)
 		target_link_libraries(bctoolbox-static INTERFACE "Winmm" "Ws2_32")
 	endif()
@@ -83,6 +107,7 @@ endif()
 if(ENABLE_SHARED)
 	add_library(bctoolbox SHARED ${BCTOOLBOX_SOURCE_FILES} ${BCTOOLBOX_HEADER_FILES})
 	target_link_libraries(bctoolbox PRIVATE ${CMAKE_THREAD_LIBS_INIT})
+	#TODO: replace by if(APPLE) when we want to make apple framework on linphone-desktop too
 	if(IOS)
 		if(IOS)
 			set(MIN_OS ${LINPHONE_IOS_DEPLOYMENT_TARGET})
@@ -93,12 +118,17 @@ if(ENABLE_SHARED)
 		set_target_properties(bctoolbox PROPERTIES
 			FRAMEWORK TRUE
 			MACOSX_FRAMEWORK_IDENTIFIER org.linphone.bctoolbox
-  			MACOSX_FRAMEWORK_INFO_PLIST Info.plist.in
+			MACOSX_FRAMEWORK_INFO_PLIST Info.plist.in
 			PUBLIC_HEADER "${BCTOOLBOX_HEADER_FILES}"
-		) 
+		)
+	endif()
+	if(APPLE)
+		target_link_libraries(bctoolbox PRIVATE "-framework Foundation" "-framework AVFoundation")
 	endif()
 	if(WIN32)
-		target_link_libraries(bctoolbox PRIVATE "Winmm" "Ws2_32")
+		if(NOT CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
+			target_link_libraries(bctoolbox PRIVATE "Winmm" "Ws2_32")
+		endif()
 		target_compile_definitions(bctoolbox PRIVATE "-DBCTBX_EXPORTS")
 	endif()
 	set_target_properties(bctoolbox PROPERTIES LINKER_LANGUAGE "CXX")
@@ -168,6 +198,17 @@ if(POLARSSL_FOUND)
 		target_link_libraries(bctoolbox PRIVATE ${POLARSSL_LIBRARIES})
 	endif()
 endif()
+if(DECAF_FOUND)
+	if(ENABLE_STATIC)
+		target_include_directories(bctoolbox-static PUBLIC ${DECAF_INCLUDE_DIRS})
+		target_link_libraries(bctoolbox-static INTERFACE ${DECAF_LIBRARY})
+	endif()
+	if(ENABLE_SHARED)
+		target_include_directories(bctoolbox PUBLIC ${DECAF_INCLUDE_DIRS})
+		target_link_libraries(bctoolbox PRIVATE ${DECAF_LIBRARY})
+	endif()
+endif()
+
 if(BCUNIT_FOUND)
 	if(ENABLE_STATIC)
 		target_include_directories(bctoolbox-tester-static PUBLIC ${BCUNIT_INCLUDE_DIRS})
@@ -181,7 +222,7 @@ if(BCUNIT_FOUND)
 				FRAMEWORK TRUE
 				MACOSX_FRAMEWORK_IDENTIFIER com.belledonne-communications.bctoolbox-tester
 				PUBLIC_HEADER "${BCTOOLBOX_HEADER_FILES}"
-			) 
+			)
 		endif()
 	endif()
 endif()
@@ -222,9 +263,15 @@ if(ENABLE_SHARED)
 	endif()
 endif()
 
-
 if(MSVC)
-		#disable "was deprecated" warnings of windows compiler (typically using strcpy_s instead of strcpy and stupid things like this)
-        target_compile_options(bctoolbox PRIVATE "/wd4996")
+	# Disable "was deprecated" warnings of windows compiler (typically using strcpy_s instead of strcpy and stupid things like this).
+	if(ENABLE_SHARED)
+		target_compile_options(bctoolbox PRIVATE "/wd4996")
+	endif()
+	if(ENABLE_STATIC)
+		target_compile_options(bctoolbox-static PRIVATE "/wd4996")
+	endif()
+	if(BCUNIT_FOUND)
 		target_compile_options(bctoolbox-tester PRIVATE "/wd4996")
+	endif()
 endif()

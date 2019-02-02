@@ -3,7 +3,6 @@
 GrooVe IP - iOS is based on Linphone open source software. The Linphone software has been modified to work with the SNRB Labs backend servers to provide calling and texting services.
 
 The build procedure is almost identical to that of Linphone - iOS. Please note the following:
-- The build does not work with the latest version of Xcode (Xcode 9). Use Xcode 8.
 - There are two files in the Classes/SNRBLabs/Private folder--Secret.h and Secret.m. These have the sample code to communicate with SNRB Labs like servers providing calling and texting capabilities. These files need to be modified to match with the interface requirements of whatever service provider you plan to use for calling/texting.
 
 Follow these steps to build and exercise the software:
@@ -38,20 +37,20 @@ Interested in helping translate Linphone? Contribute [on Transifex](https://www.
 ## Report bugs and submit patchs
 
 If you want to dig through Linphone code or report a bug, please read `CONTRIBUTING.md` first. You should also read this `README` entirely ;-).
- 
+
 ## How to be a beta tester ?
- 
+
 Enter the Beta :
  - Download TestFlight from the App Store and log in it with your apple-id
- - Send an email to linphone-iphone@belledonne-communications.com, with object : [Beta test - Request], where you precise your apple-id you logged in TestFlight with	
+ - Send an email to linphone-iphone@belledonne-communications.com, with object : [Beta test - Request], where you precise your apple-id you logged in TestFlight with
  - You will receive an invitation code to the beta in the following days via your email associated to your apple-id
  - Enter the invitation code received into TestFlight
  - Download Linphone from TestFlight
  - And voilà ! TestFlight will send you a notification every time a new beta test is available.
- 
+
 Send a crash report :
  - It is done automatically by TestFlight
- 
+
 Report a bug :
  - Open Linphone
  - Go to Settings —> Advanced —> Send logs
@@ -86,8 +85,10 @@ Linphone for iPhone depends on liblinphone SDK. This SDK is generated from makef
 
 ## Incorporating our SDK in your project
 
-After the SDK has been built, add all the `.framework` files located in `liblinphone-sdk/apple-darwin/Frameworks` to your XCode project Embedded Frameworks.
-Add a Run Script step to your build steps, put it after your step to embed frameworks, set it to use our `deploy.sh` script located in `liblinphone-sdk/apple-darwin/Tools`.
+After the SDK has been built, add all the `.framework` files located in `liblinphone-sdk/apple-darwin/Frameworks` to your XCode project Embedded Frameworks and linked binaries.
+Make sure that your project FRAMEWORK_SEARCH_PATHS contains "$(PROJECT_DIR)/liblinphone-sdk/apple-darwin/Frameworks"
+Make sure that your project LD_RUNPATH_SEARCH_PATHS contains "$(inherited) @executable_path/Frameworks";
+Add a Run Script step to your build steps, put it after your step to embed frameworks, set it to use our `deploy.sh` script located in the `Tools` folder of linphone-iphone root directory.
 
 ## Licensing: GPL third parties versus non GPL third parties
 

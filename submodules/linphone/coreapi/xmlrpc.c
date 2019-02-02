@@ -17,14 +17,16 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
-#include "linphone/core.h"
-#include "private.h"
-
 #include <string.h>
 #include <libxml/tree.h>
 #include <libxml/xmlwriter.h>
 
+#include "linphone/core.h"
 
+#include "c-wrapper/c-wrapper.h"
+
+// TODO: From coreapi. Remove me later.
+#include "private.h"
 
 BELLE_SIP_DECLARE_NO_IMPLEMENTED_INTERFACES(LinphoneXmlRpcRequestCbs);
 
@@ -196,7 +198,7 @@ static void parse_valid_xml_rpc_response(LinphoneXmlRpcRequest *request, const c
 	request->status = LinphoneXmlRpcStatusFailed;
 	xml_ctx->doc = xmlReadDoc((const unsigned char*)response_body, 0, NULL, 0);
 	if (xml_ctx->doc != NULL) {
-		const char *response_str = NULL;
+		char *response_str = NULL;
 		if (linphone_create_xml_xpath_context(xml_ctx) < 0) goto end;
 		switch (request->response.type) {
 			case LinphoneXmlRpcArgInt:
@@ -261,14 +263,14 @@ static LinphoneXmlRpcRequest * _linphone_xml_rpc_request_new(LinphoneXmlRpcArgTy
 }
 
 static void _linphone_xml_rpc_request_add_int_arg(LinphoneXmlRpcRequest *request, int value) {
-	LinphoneXmlRpcArg *arg = belle_sip_malloc0(sizeof(LinphoneXmlRpcArg));
+	LinphoneXmlRpcArg *arg = reinterpret_cast<LinphoneXmlRpcArg *>(belle_sip_malloc0(sizeof(LinphoneXmlRpcArg)));
 	arg->type = LinphoneXmlRpcArgInt;
 	arg->data.i = value;
 	request->arg_list = belle_sip_list_append(request->arg_list, arg);
 }
 
 static void _linphone_xml_rpc_request_add_string_arg(LinphoneXmlRpcRequest *request, const char *value) {
-	LinphoneXmlRpcArg *arg = belle_sip_malloc0(sizeof(LinphoneXmlRpcArg));
+	LinphoneXmlRpcArg *arg = reinterpret_cast<LinphoneXmlRpcArg *>(belle_sip_malloc0(sizeof(LinphoneXmlRpcArg)));
 	arg->type = LinphoneXmlRpcArgString;
 	arg->data.s = belle_sip_strdup(value);
 	request->arg_list = belle_sip_list_append(request->arg_list, arg);
@@ -308,31 +310,6 @@ BELLE_SIP_INSTANCIATE_VPTR(LinphoneXmlRpcSession, belle_sip_object_t,
 
 LinphoneXmlRpcRequest * linphone_xml_rpc_request_new(LinphoneXmlRpcArgType return_type, const char *method) {
 	LinphoneXmlRpcRequest *request = _linphone_xml_rpc_request_new(return_type, method);
-	format_request(request);
-	return request;
-}
-
-LinphoneXmlRpcRequest * linphone_xml_rpc_request_new_with_args(LinphoneXmlRpcArgType return_type, const char *method, ...) {
-	bool_t cont = TRUE;
-	va_list args;
-	LinphoneXmlRpcArgType arg_type;
-	LinphoneXmlRpcRequest *request = _linphone_xml_rpc_request_new(return_type, method);
-	va_start(args, method);
-	while (cont) {
-		arg_type = va_arg(args, LinphoneXmlRpcArgType);
-		switch (arg_type) {
-			case LinphoneXmlRpcArgNone:
-				cont = FALSE;
-				break;
-			case LinphoneXmlRpcArgInt:
-				_linphone_xml_rpc_request_add_int_arg(request, va_arg(args, int));
-				break;
-			case LinphoneXmlRpcArgString:
-				_linphone_xml_rpc_request_add_string_arg(request, va_arg(args, char *));
-				break;
-		}
-	}
-	va_end(args);
 	format_request(request);
 	return request;
 }
@@ -409,6 +386,10 @@ void linphone_xml_rpc_session_set_user_data(LinphoneXmlRpcSession *session, void
 	session->user_data = ud;
 }
 
+LinphoneXmlRpcRequest * linphone_xml_rpc_session_create_request(LinphoneXmlRpcSession *session, LinphoneXmlRpcArgType return_type, const char *method) {
+	return linphone_xml_rpc_request_new(return_type, method);
+}
+
 void linphone_xml_rpc_session_send_request(LinphoneXmlRpcSession *session, LinphoneXmlRpcRequest *request) {
 	belle_http_request_listener_callbacks_t cbs = { 0 };
 	belle_http_request_listener_t *l;
@@ -454,4 +435,3 @@ void linphone_xml_rpc_session_release(LinphoneXmlRpcSession *session){
 	session->released = TRUE;
 	belle_sip_object_unref(session);
 }
-

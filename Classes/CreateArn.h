@@ -22,7 +22,7 @@
 
 #import "GenericResponse.h"
 
-#define SERVICE_TYPE_APPLE @"APN"
+#define SERVICE_TYPE_APPLE @"APN"	// Service type for GrooVe IP on Apple iPhone
 
 @interface CreateArn:NSObject
 

@@ -1,6 +1,6 @@
 ############################################################################
 # sofiasip.cmake
-# Copyright (C) 2014  Belledonne Communications, Grenoble France
+# Copyright (C) 2014-2018  Belledonne Communications, Grenoble France
 #
 ############################################################################
 #
@@ -20,24 +20,30 @@
 #
 ############################################################################
 
-set(EP_sofiasip_GIT_REPOSITORY "git://git.linphone.org/sofia-sip.git" CACHE STRING "sofiasip repository URL")
-set(EP_sofiasip_GIT_TAG_LATEST "bc" CACHE STRING "sofiasip tag to use when compiling latest version")
-set(EP_sofiasip_GIT_TAG "dcdc8efab5d164ec55c8706f978a827af04459e4" CACHE STRING "sofiasip tag to use")
-set(EP_sofiasip_EXTERNAL_SOURCE_PATHS "externals/sofia-sip")
-#set(EP_sofiasip_CMAKE_OPTIONS )
-#set(EP_sofiasip_LINKING_TYPE "-DENABLE_STATIC=0")
+lcb_git_repository("git://git.linphone.org/sofia-sip.git")
+lcb_git_tag_latest("bc")
+lcb_git_tag("dcdc8efab5d164ec55c8706f978a827af04459e4")
+lcb_external_source_paths("externals/sofia-sip")
 
-set(EP_sofiasip_DEPENDENCIES )
-set(EP_sofiasip_LINKING_TYPE "--disable-static" "--enable-shared")
-set(EP_sofiasip_BUILD_METHOD "autotools")
-set(EP_sofiasip_USE_AUTOGEN True)
-set(EP_sofiasio_BUILD_IN_SOURCE True)
-set(EP_sofiasip_CONFIGURE_OPTIONS )
-set(EP_sofiasip_CROSS_COMPILATION_OPTIONS
+lcb_build_method("autotools")
+lcb_use_autogen(YES)
+lcb_build_in_source_tree(YES)
+lcb_linking_type("--disable-static" "--enable-shared")
+
+if (ENABLE_MDNS)
+	lcb_configure_options("--enable-mdns")
+endif()
+
+
+lcb_cross_compilation_options(
 	"--prefix=${CMAKE_INSTALL_PREFIX}"
 	"--host=${LINPHONE_BUILDER_HOST}"
 )
 
-# RPM 
-set(EP_sofiasip_SPEC_FILE "packages/sofia-sip-*.spec")
-set(EP_sofiasip_RPMBUILD_NAME "sofia-sip")
+lcb_spec_file("packages/sofia-sip-*.spec")
+lcb_rpmbuild_name("sofia-sip")
+lcb_rpmbuild_options(
+	"--with bc"
+	"--without glib"
+)
+lcb_use_autotools_for_rpm(YES)

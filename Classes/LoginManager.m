@@ -38,6 +38,20 @@ static LoginManager *loginManager = nil;
 			if ([key isEqualToString:@"PhoneNumber"]) {
 				loginResponse.phoneNumber = (NSString *) value;
 				LOGD(@"PhoneNumber = %@", loginResponse.phoneNumber);
+			} else if ([key isEqualToString:@"Currency"]) {
+				//
+				// Currency (string)	Credits		Dollars		Other/None
+				// Currency (int)	  0		  1		  -1
+				//
+				NSString *currencyString = (NSString *) value;
+				if ([currencyString isEqualToString:@"Credits"]) {
+					loginResponse.currency = 0;
+				} else if ([currencyString isEqualToString:@"Dollars"]) {
+					loginResponse.currency = 1;
+				} else {
+					loginResponse.currency = -1;
+				}
+				LOGD(@"Currency = %@ / %d", currencyString, loginResponse.currency);
 			} else if ([key isEqualToString:@"ExternalSip"]) {
 				NSDictionary *dictSip = (NSDictionary *) value;
 				loginResponse.sipName = dictSip[@"UserName"];

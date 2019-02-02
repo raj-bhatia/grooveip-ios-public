@@ -56,7 +56,8 @@
 		[NSString stringWithFormat:NSLocalizedString(@"Chat with %@", nil), _addressLabel.text];
 	_callButton.accessibilityLabel = [NSString stringWithFormat:NSLocalizedString(@"Call %@", nil), _addressLabel.text];
 	// Test presence
-	Contact* contact = [FastAddressBook getContactWithAddress:(addr)];
+	Contact *contact;
+	contact = addr ? [FastAddressBook getContactWithAddress:(addr)] : NULL;
 
 	_linphoneImage.hidden = TRUE;
 	if (contact) {
@@ -72,6 +73,12 @@
 	if (addr) {
 		linphone_address_destroy(addr);
 	}
+
+#if 1	// Changed Linphone code - Disable call button if in SMS tab
+	if (TRUE == TabBarView.inSmsTab) {
+		_callButton.enabled = FALSE;
+	}
+#endif
 }
 
 - (void)shouldHideLinphoneImageOfAddress {
@@ -133,13 +140,11 @@
 }
 
 - (IBAction)onChatClick:(id)event {
+#if 1	// Changed Linphone code - Keep track of SMS (Chat) tab
+	TabBarView.inSmsTab = TRUE;
+#endif
 	LinphoneAddress *addr = [LinphoneUtils normalizeSipOrPhoneAddress:_addressLabel.text];
-	if (addr == NULL)
-		return;
-	ChatConversationView *view = VIEW(ChatConversationView);
-	LinphoneChatRoom *room = linphone_core_get_chat_room(LC, addr);
-	[view setChatRoom:room];
-	[PhoneMainView.instance changeCurrentView:view.compositeViewDescription];
+	[PhoneMainView.instance getOrCreateOneToOneChatRoom:addr waitView:_waitView];
 	linphone_address_destroy(addr);
 }
 

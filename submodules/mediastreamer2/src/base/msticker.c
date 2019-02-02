@@ -543,14 +543,27 @@ float ms_ticker_get_average_load(MSTicker *ticker){
 	return (float)ticker->av_load;
 }
 
-
-
 void ms_ticker_get_last_late_tick(MSTicker *ticker, MSTickerLateEvent *ev){
 	bool_t need_lock = ms_thread_self() != ticker->thread_id;
 	if (need_lock) ms_mutex_lock(&ticker->lock);
 	memcpy(ev,&ticker->late_event,sizeof(MSTickerLateEvent));
 	if (need_lock) ms_mutex_unlock(&ticker->lock);
 }
+
+static void ms_ticker_synchronizer_reset(MSTickerSynchronizer* ts){
+	memset(&ts, 0, sizeof(ts));
+}
+
+void ms_ticker_set_synchronizer(MSTicker *ticker, MSTickerSynchronizer *ts) {
+	if (ts) {
+		ms_ticker_synchronizer_reset(ts);
+		ms_ticker_set_time_func(ticker, (MSTickerTimeFunc)ms_ticker_synchronizer_get_corrected_time, ts);
+	} else {
+		ms_ticker_set_time_func(ticker, NULL, NULL);
+	}
+}
+
+
 
 static uint64_t get_ms(const MSTimeSpec *ts){
 	return (ts->tv_sec*1000LL) + ((ts->tv_nsec+500000LL)/1000000LL);
@@ -566,10 +579,10 @@ static const double clock_coef = .01;
 
 MSTickerSynchronizer* ms_ticker_synchronizer_new(void) {
 	MSTickerSynchronizer *obj=(MSTickerSynchronizer *)ms_new0(MSTickerSynchronizer,1);
-	obj->av_skew = 0;
-	obj->offset = 0;
 	return obj;
 }
+
+
 
 double ms_ticker_synchronizer_set_external_time(MSTickerSynchronizer* ts, const MSTimeSpec *time) {
 	int64_t sound_time;
@@ -582,10 +595,23 @@ double ms_ticker_synchronizer_set_external_time(MSTickerSynchronizer* ts, const 
 	sound_time = ts->offset + ms;
 	diff = wc - sound_time;
 	ts->av_skew = (ts->av_skew * (1.0 - clock_coef)) + ((double) diff * clock_coef);
+	if ((++ts->external_time_count) % 100 == 0) {
+		ms_message("sound/wall clock skew is average=%f ms", ts->av_skew);
+	}
 	return ts->av_skew;
 }
 
+double ms_ticker_synchronizer_update(MSTickerSynchronizer *ts, uint64_t nb_samples, unsigned int sample_rate) {
+	uint64_t ms = ((1000 * nb_samples) / (uint64_t)sample_rate);
+	MSTimeSpec timespec;
+	timespec.tv_nsec = (ms % 1000) * 1000000LL;
+	timespec.tv_sec = ms / 1000LL;
+	return ms_ticker_synchronizer_set_external_time(ts, &timespec);
+}
 
+uint64_t ms_ticker_round(uint64_t ms) {
+	return (ms / (uint64_t)TICKER_INTERVAL) * (uint64_t)TICKER_INTERVAL;
+}
 
 uint64_t ms_ticker_synchronizer_get_corrected_time(MSTickerSynchronizer* ts) {
 	/* round skew to timer resolution in order to avoid adapt the ticker just with statistical "noise" */

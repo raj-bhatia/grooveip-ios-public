@@ -34,11 +34,10 @@
 
 #cmakedefine HAVE_RESINIT
 
-#cmakedefine HAVE_ANTLR3_H
-#cmakedefine HAVE_ANTLR_STRING_STREAM_NEW
-
 #cmakedefine HAVE_TUNNEL
 #cmakedefine HAVE_ZLIB
 
 #cmakedefine BELLE_SDP_FORCE_RTP_MAP
 #cmakedefine ENABLE_SERVER_SOCKETS
+
+#cmakedefine HAVE_MDNS

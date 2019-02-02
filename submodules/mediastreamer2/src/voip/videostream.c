@@ -30,6 +30,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "mediastreamer2/zrtp.h"
 #include "mediastreamer2/msvideopresets.h"
 #include "mediastreamer2/mseventqueue.h"
+#include "mediastreamer2/mstee.h"
 #include "private.h"
 
 #if __APPLE__
@@ -106,6 +107,10 @@ static void internal_event_cb(void *ud, MSFilter *f, unsigned int event, void *e
 	const MSVideoCodecRPSI *rpsi;
 
 	switch (event) {
+		case MS_VIDEO_DECODER_SEND_FIR:
+			ms_message("Request sending of FIR on videostream [%p]", stream);
+			video_stream_send_fir(stream);
+			break;
 		case MS_VIDEO_DECODER_SEND_PLI:
 			ms_message("Request sending of PLI on videostream [%p]", stream);
 			video_stream_send_pli(stream);
@@ -217,8 +222,8 @@ static void video_stream_track_fps_changes(VideoStream *stream){
 					if (fabsf(fps-stream->configured_fps)/stream->configured_fps>0.2){
 						ms_warning("Measured and target fps significantly different (%f<->%f), updating encoder.",
 							fps,stream->configured_fps);
-						stream->configured_fps=fps;
-						ms_filter_call_method(stream->ms.encoder,MS_FILTER_SET_FPS,&stream->configured_fps);
+						stream->real_fps=fps;
+						ms_filter_call_method(stream->ms.encoder,MS_FILTER_SET_FPS,&stream->real_fps);
 					}
 				}
 			}
@@ -240,7 +245,7 @@ const char *video_stream_get_default_video_renderer(void){
 #elif defined(MS2_WINDOWS_DESKTOP)
 	return "MSDrawDibDisplay";
 #elif defined(__ANDROID__)
-	return "MSAndroidDisplay";
+	return "MSAndroidOpenGLDisplay";
 #elif __APPLE__ && !TARGET_OS_IPHONE
 	return "MSOSXGLDisplay";
 #elif defined (HAVE_XV)
@@ -257,7 +262,16 @@ const char *video_stream_get_default_video_renderer(void){
 }
 
 static void choose_display_name(VideoStream *stream){
-	stream->display_name=ms_strdup(video_stream_get_default_video_renderer());
+#if defined(__ANDROID__)
+	MSDevicesInfo *devices = ms_factory_get_devices_info(stream->ms.factory);
+	SoundDeviceDescription *description = ms_devices_info_get_sound_device_description(devices);
+	if (description->flags & DEVICE_HAS_CRAPPY_OPENGL)
+		stream->display_name = ms_strdup("MSAndroidDisplay");
+	else
+		stream->display_name = ms_strdup(video_stream_get_default_video_renderer());
+#else
+	stream->display_name = ms_strdup(video_stream_get_default_video_renderer());
+#endif
 }
 
 static float video_stream_get_rtcp_xr_average_quality_rating(void *userdata) {
@@ -309,7 +323,8 @@ VideoStream *video_stream_new_with_sessions(MSFactory* factory, const MSMediaStr
 
 	stream->ms.ice_check_list=NULL;
 	MS_VIDEO_SIZE_ASSIGN(stream->sent_vsize, CIF);
-	stream->fps=0;
+	stream->forced_fps=0;
+	stream->real_fps=0;
 	stream->dir=MediaStreamSendRecv;
 	stream->display_filter_auto_rotate_enabled=0;
 	stream->freeze_on_error = FALSE;
@@ -345,7 +360,7 @@ void video_stream_set_preview_size(VideoStream *stream, MSVideoSize vsize){
 }
 
 void video_stream_set_fps(VideoStream *stream, float fps){
-	stream->fps=fps;
+	stream->forced_fps=fps;
 }
 
 MSVideoSize video_stream_get_sent_video_size(const VideoStream *stream) {
@@ -417,7 +432,6 @@ void video_stream_set_display_filter_name(VideoStream *s, const char *fname){
 		s->display_name=ms_strdup(fname);
 }
 
-
 static void ext_display_cb(void *ud, MSFilter* f, unsigned int event, void *eventdata){
 	MSExtDisplayOutput *output=(MSExtDisplayOutput*)eventdata;
 	VideoStream *st=(VideoStream*)ud;
@@ -457,13 +471,13 @@ static MSVideoSize get_with_same_orientation_and_ratio(MSVideoSize size, MSVideo
 static void configure_video_source(VideoStream *stream){
 	MSVideoSize vsize,cam_vsize;
 	float fps=15;
+	int bitrate;
 	MSPixFmt format=MS_PIX_FMT_UNKNOWN;
 	MSVideoEncoderPixFmt encoder_supports_source_format;
 	int ret;
 	MSVideoSize preview_vsize;
 	MSPinFormat pf={0};
 	bool_t is_player=ms_filter_get_id(stream->source)==MS_ITC_SOURCE_ID || ms_filter_get_id(stream->source)==MS_MKV_PLAYER_ID;
-
 
 	/* transmit orientation to source filter */
 	if (ms_filter_has_method(stream->source, MS_VIDEO_CAPTURE_SET_DEVICE_ORIENTATION))
@@ -475,6 +489,12 @@ static void configure_video_source(VideoStream *stream){
 	/* transmit its preview window id if any to source filter*/
 	if (stream->preview_window_id!=0){
 		video_stream_set_native_preview_window_id(stream, stream->preview_window_id);
+	}
+	ms_filter_call_method(stream->ms.encoder, MS_FILTER_GET_BITRATE, &bitrate);
+	if (bitrate == 0) {
+		bitrate = ms_factory_get_expected_bandwidth(stream->ms.factory);
+		ms_message("Encoder current bitrate is 0, using expected bandwidth %i", bitrate);
+		ms_filter_call_method(stream->ms.encoder, MS_FILTER_SET_BITRATE, &bitrate);
 	}
 
 	ms_filter_call_method(stream->ms.encoder,MS_FILTER_GET_VIDEO_SIZE,&vsize);
@@ -521,6 +541,9 @@ static void configure_video_source(VideoStream *stream){
 #endif
 	}
 	ms_filter_call_method(stream->ms.encoder,MS_FILTER_SET_VIDEO_SIZE,&vsize);
+
+	if (stream->ms.target_bitrate > 0) update_bitrate_limit_from_tmmbr(&stream->ms, stream->ms.target_bitrate);
+
 	ms_filter_call_method(stream->ms.encoder,MS_FILTER_GET_FPS,&fps);
 
 	if (is_player){
@@ -528,8 +551,8 @@ static void configure_video_source(VideoStream *stream){
 		if (fps==0) fps=15;
 		ms_filter_call_method(stream->ms.encoder,MS_FILTER_SET_FPS,&fps);
 	}else{
-		if (stream->fps!=0)
-			fps=stream->fps;
+		if (stream->forced_fps!=0)
+			fps=stream->forced_fps;
 		ms_message("Setting sent vsize=%ix%i, fps=%f",vsize.width,vsize.height,fps);
 		/* configure the filters */
 		if (ms_filter_get_id(stream->source)!=MS_STATIC_IMAGE_ID || !stream->staticimage_webcam_fps_optimization) {
@@ -815,25 +838,39 @@ static void apply_video_preset(VideoStream *stream, PayloadType *pt) {
 
 static void apply_bitrate_limit(VideoStream *stream, PayloadType *pt) {
 	MSVideoConfiguration *vconf_list = NULL;
+	int target_upload_bandwidth = 0;
 
-	if (stream->ms.target_bitrate<=0) {
-		stream->ms.target_bitrate=pt->normal_bitrate;
-		ms_message("target bitrate not set for stream [%p] using payload's bitrate is %i",stream,stream->ms.target_bitrate);
+	if (stream->ms.max_target_bitrate <= 0) {
+		if (pt->normal_bitrate <= 0) {
+			ms_message("target and payload bitrates not set for stream [%p] using lowest configuration of preferred video size %dx%d",stream,stream->sent_vsize.width, stream->sent_vsize.height);
+		} else {
+			stream->ms.max_target_bitrate=pt->normal_bitrate;
+			ms_message("target bitrate not set for stream [%p] using payload's bitrate is %i",stream,stream->ms.max_target_bitrate);
+		}
 	}
 
-	ms_message("Limiting bitrate of video encoder to %i bits/s for stream [%p]",stream->ms.target_bitrate,stream);
+	ms_message("Limiting bitrate of video encoder to %i bits/s for stream [%p]",stream->ms.max_target_bitrate,stream);
 	ms_filter_call_method(stream->ms.encoder, MS_VIDEO_ENCODER_GET_CONFIGURATION_LIST, &vconf_list);
 	if (vconf_list != NULL) {
-		MSVideoConfiguration vconf = ms_video_find_best_configuration_for_bitrate(vconf_list, stream->ms.target_bitrate, ms_factory_get_cpu_count(stream->ms.factory));
-		/* Adjust configuration video size to use the user preferred video size if it is lower that the configuration one. */
-		if ((stream->sent_vsize.height * stream->sent_vsize.width) < (vconf.vsize.height * vconf.vsize.width)) {
-			vconf.vsize = stream->sent_vsize;
+		MSVideoConfiguration vconf;
+
+		if (stream->ms.max_target_bitrate > 0) {
+			vconf = ms_video_find_best_configuration_for_bitrate(vconf_list, stream->ms.max_target_bitrate, ms_factory_get_cpu_count(stream->ms.factory));
+			/* Adjust configuration video size to use the user preferred video size if it is lower that the configuration one. */
+			if ((stream->sent_vsize.height * stream->sent_vsize.width) < (vconf.vsize.height * vconf.vsize.width)) {
+				vconf.vsize = stream->sent_vsize;
+			}
+		} else {
+			/* We retrieve the lowest configuration for that vsize since the bandwidth estimator will increase quality if possible */
+			vconf = ms_video_find_worst_configuration_for_size(vconf_list, stream->sent_vsize, ms_factory_get_cpu_count(stream->ms.factory));
+			/*If the lower config is found, required_bitrate will be 0. In this case, use the bitrate_limit*/
+			target_upload_bandwidth = vconf.required_bitrate > 0 ? vconf.required_bitrate : vconf.bitrate_limit;
 		}
 		ms_filter_call_method(stream->ms.encoder, MS_VIDEO_ENCODER_SET_CONFIGURATION, &vconf);
 	} else {
-		ms_filter_call_method(stream->ms.encoder, MS_FILTER_SET_BITRATE, &stream->ms.target_bitrate);
+		ms_filter_call_method(stream->ms.encoder, MS_FILTER_SET_BITRATE, &stream->ms.max_target_bitrate);
 	}
-	rtp_session_set_target_upload_bandwidth(stream->ms.sessions.rtp_session, stream->ms.target_bitrate);
+	rtp_session_set_target_upload_bandwidth(stream->ms.sessions.rtp_session, target_upload_bandwidth != 0 ? target_upload_bandwidth : stream->ms.max_target_bitrate);
 }
 
 static MSPixFmt mime_type_to_pix_format(const char *mime_type) {
@@ -885,8 +922,18 @@ static int video_stream_start_with_source_and_output(VideoStream *stream, RtpPro
 		rtp_session_set_jitter_compensation(rtps, jitt_comp);
 	}
 
+	/* FIXME: Temporary workaround for -Wcast-function-type. */
+	#if __GNUC__ >= 8
+		_Pragma("GCC diagnostic push")
+		_Pragma("GCC diagnostic ignored \"-Wcast-function-type\"")
+	#endif // if __GNUC__ >= 8
+
 	rtp_session_signal_connect(stream->ms.sessions.rtp_session,"payload_type_changed",
 			(RtpCallback)video_stream_payload_type_changed,&stream->ms);
+
+	#if __GNUC__ >= 8
+		_Pragma("GCC diagnostic pop")
+	#endif // if __GNUC__ >= 8
 
 	rtp_session_get_jitter_buffer_params(stream->ms.sessions.rtp_session,&jbp);
 	jbp.max_packets=1000;//needed for high resolution video
@@ -933,9 +980,8 @@ static int video_stream_start_with_source_and_output(VideoStream *stream, RtpPro
 			}
 
 			apply_video_preset(stream, pt);
-			if (pt->normal_bitrate>0){
-				apply_bitrate_limit(stream, pt);
-			}
+			apply_bitrate_limit(stream, pt);
+
 			if (pt->send_fmtp){
 				ms_filter_call_method(stream->ms.encoder,MS_FILTER_ADD_FMTP,pt->send_fmtp);
 			}
@@ -1095,6 +1141,7 @@ static int video_stream_start_with_source_and_output(VideoStream *stream, RtpPro
 			if (stream->recorder_output){
 				ms_connection_helper_link(&ch,stream->tee3,0,0);
 				ms_filter_link(stream->tee3,1,stream->recorder_output,0);
+				video_stream_enable_recording(stream, FALSE);/*until recorder is started, the tee3 is kept muted on pin 1*/
 				configure_recorder_output(stream);
 			}
 			ms_connection_helper_link(&ch,stream->ms.decoder,0,0);
@@ -1196,10 +1243,7 @@ void video_stream_update_video_params(VideoStream *stream){
  *
  * @return NULL if keep_old_source is FALSE, or the previous source filter if keep_old_source is TRUE
  */
-static MSFilter* _video_stream_change_camera(VideoStream *stream, MSWebCam *cam, MSFilter* new_source, MSFilter *sink, bool_t keep_old_source){
-	PayloadType *pt;
-	RtpProfile *profile;
-	int payload;
+static MSFilter* _video_stream_change_camera(VideoStream *stream, MSWebCam *cam, MSFilter* new_source, MSFilter *sink, bool_t keep_old_source, bool_t skip_payload_config){
 	MSFilter* old_source = NULL;
 	bool_t new_src_different = (new_source && new_source != stream->source);
 	bool_t use_player        = (sink && !stream->player_active) || (!sink && stream->player_active);
@@ -1256,16 +1300,20 @@ static MSFilter* _video_stream_change_camera(VideoStream *stream, MSWebCam *cam,
 			ms_filter_call_method(stream->output,MS_VIDEO_DISPLAY_SET_DEVICE_ORIENTATION,&stream->device_orientation);
 		}
 
-		/* Apply bitrate limit to increase video size if the preferred one has changed. */
-		profile = rtp_session_get_profile(stream->ms.sessions.rtp_session);
-		payload = rtp_session_get_send_payload_type(stream->ms.sessions.rtp_session);
-		pt = rtp_profile_get_payload(profile, payload);
-		if (stream->source_performs_encoding == TRUE) {
-			MSPixFmt format = mime_type_to_pix_format(pt->mime_type);
-			ms_filter_call_method(stream->source, MS_FILTER_SET_PIX_FMT, &format);
-		}
-		apply_video_preset(stream, pt);
-		if (pt->normal_bitrate > 0){
+		if (!skip_payload_config) {
+			PayloadType *pt;
+			RtpProfile *profile;
+			int payload;
+
+			/* Apply bitrate limit to increase video size if the preferred one has changed. */
+			profile = rtp_session_get_profile(stream->ms.sessions.rtp_session);
+			payload = rtp_session_get_send_payload_type(stream->ms.sessions.rtp_session);
+			pt = rtp_profile_get_payload(profile, payload);
+			if (stream->source_performs_encoding == TRUE) {
+				MSPixFmt format = mime_type_to_pix_format(pt->mime_type);
+				ms_filter_call_method(stream->source, MS_FILTER_SET_PIX_FMT, &format);
+			}
+			apply_video_preset(stream, pt);
 			apply_bitrate_limit(stream ,pt);
 		}
 
@@ -1291,24 +1339,24 @@ static MSFilter* _video_stream_change_camera(VideoStream *stream, MSWebCam *cam,
 }
 
 void video_stream_change_camera(VideoStream *stream, MSWebCam *cam){
-	_video_stream_change_camera(stream, cam, NULL, NULL, FALSE);
+	_video_stream_change_camera(stream, cam, NULL, NULL, FALSE, FALSE);
 }
 
 MSFilter* video_stream_change_camera_keep_previous_source(VideoStream *stream, MSWebCam *cam){
-	return _video_stream_change_camera(stream, cam, NULL, NULL, TRUE);
+	return _video_stream_change_camera(stream, cam, NULL, NULL, TRUE, FALSE);
 }
 
 MSFilter* video_stream_change_source_filter(VideoStream *stream, MSWebCam* cam, MSFilter* filter, bool_t keep_previous ){
-	return _video_stream_change_camera(stream, cam, filter, NULL, keep_previous);
+	return _video_stream_change_camera(stream, cam, filter, NULL, keep_previous, FALSE);
 }
 
 void video_stream_open_player(VideoStream *stream, MSFilter *sink){
 	ms_message("video_stream_open_player(): sink=%p",sink);
-	_video_stream_change_camera(stream, stream->cam, NULL, sink, FALSE);
+	_video_stream_change_camera(stream, stream->cam, NULL, sink, FALSE, FALSE);
 }
 
 void video_stream_close_player(VideoStream *stream){
-	_video_stream_change_camera(stream,stream->cam, NULL, NULL, FALSE);
+	_video_stream_change_camera(stream,stream->cam, NULL, NULL, FALSE, FALSE);
 }
 
 void video_stream_send_fir(VideoStream *stream) {
@@ -1422,7 +1470,18 @@ static MSFilter* _video_stream_stop(VideoStream * stream, bool_t keep_source)
 		}
 	}
 	rtp_session_set_rtcp_xr_media_callbacks(stream->ms.sessions.rtp_session, NULL);
+
+	/* FIXME: Temporary workaround for -Wcast-function-type. */
+	#if __GNUC__ >= 8
+		_Pragma("GCC diagnostic push")
+		_Pragma("GCC diagnostic ignored \"-Wcast-function-type\"")
+	#endif // if __GNUC__ >= 8
+
 	rtp_session_signal_disconnect_by_callback(stream->ms.sessions.rtp_session,"payload_type_changed",(RtpCallback)video_stream_payload_type_changed);
+
+	#if __GNUC__ >= 8
+		_Pragma("GCC diagnostic pop")
+	#endif // if __GNUC__ >= 8
 
 	/*Automatically the video recorder if it was opened previously*/
 	if (stream->recorder_output && ms_filter_implements_interface(stream->recorder_output, MSFilterRecorderInterface)){
@@ -1550,7 +1609,7 @@ static void configure_video_preview_source(VideoPreview *stream) {
 	MSVideoSize vsize = stream->sent_vsize;
 	float fps;
 
-	if (stream->fps != 0) fps = stream->fps;
+	if (stream->forced_fps != 0) fps = stream->forced_fps;
 	else fps = (float)29.97;
 
 	/* Transmit orientation to source filter. */
@@ -1582,11 +1641,6 @@ static void configure_video_preview_source(VideoPreview *stream) {
 }
 
 void video_preview_start(VideoPreview *stream, MSWebCam *device) {
-	MSPixFmt format = MS_YUV420P; /* Display format */
-	int mirroring = 1;
-	int corner = -1;
-	MSVideoSize disp_size = stream->sent_vsize;
-	const char *displaytype = stream->display_name;
 	MSConnectionHelper ch;
 
 	stream->source = ms_web_cam_create_reader(device);
@@ -1594,14 +1648,27 @@ void video_preview_start(VideoPreview *stream, MSWebCam *device) {
 	/* configure the filters */
 	configure_video_preview_source(stream);
 
-	if (displaytype) {
-		stream->output2=ms_factory_create_filter_from_name(stream->ms.factory, displaytype);
-		ms_filter_call_method(stream->output2, MS_FILTER_SET_PIX_FMT, &format);
-		ms_filter_call_method(stream->output2, MS_FILTER_SET_VIDEO_SIZE, &disp_size);
-		ms_filter_call_method(stream->output2, MS_VIDEO_DISPLAY_ENABLE_MIRRORING, &mirroring);
-		ms_filter_call_method(stream->output2, MS_VIDEO_DISPLAY_SET_LOCAL_VIEW_MODE, &corner);
-		/* and then connect all */
+#if defined(__ANDROID__)
+	// On Android the capture filter doesn't need a display filter to render the preview
+	stream->output2 = ms_factory_create_filter(stream->ms.factory, MS_VOID_SINK_ID);
+#else
+	{
+		MSPixFmt format = MS_YUV420P; /* Display format */
+		int mirroring = 1;
+		int corner = -1;
+		MSVideoSize disp_size = stream->sent_vsize;
+		const char *displaytype = stream->display_name;
+
+		if (displaytype) {
+			stream->output2=ms_factory_create_filter_from_name(stream->ms.factory, displaytype);
+			ms_filter_call_method(stream->output2, MS_FILTER_SET_PIX_FMT, &format);
+			ms_filter_call_method(stream->output2, MS_FILTER_SET_VIDEO_SIZE, &disp_size);
+			ms_filter_call_method(stream->output2, MS_VIDEO_DISPLAY_ENABLE_MIRRORING, &mirroring);
+			ms_filter_call_method(stream->output2, MS_VIDEO_DISPLAY_SET_LOCAL_VIEW_MODE, &corner);
+			/* and then connect all */
+		}
 	}
+#endif
 
 	stream->local_jpegwriter = ms_factory_create_filter(stream->ms.factory, MS_JPEG_WRITER_ID);
 	if (stream->local_jpegwriter) {
@@ -1824,6 +1891,15 @@ const MSWebCam * video_stream_get_camera(const VideoStream *stream) {
 void video_stream_use_video_preset(VideoStream *stream, const char *preset) {
 	if (stream->preset != NULL) ms_free(stream->preset);
 	stream->preset = ms_strdup(preset);
+}
+
+/*this function optimizes the processing by enabling the duplication of video packets to the recorder, which is not required to be done
+ * when the recorder is not recording of course.*/
+void video_stream_enable_recording(VideoStream *stream, bool_t enabled){
+	if (stream->tee3){
+		int pin = 1;
+		ms_filter_call_method(stream->tee3, enabled ? MS_TEE_UNMUTE : MS_TEE_MUTE, &pin);
+	}
 }
 
 MSFilter * video_stream_open_remote_play(VideoStream *stream, const char *filename){

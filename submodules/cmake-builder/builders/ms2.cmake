@@ -1,6 +1,6 @@
 ############################################################################
 # ms2.cmake
-# Copyright (C) 2014  Belledonne Communications, Grenoble France
+# Copyright (C) 2014-2018  Belledonne Communications, Grenoble France
 #
 ############################################################################
 #
@@ -25,6 +25,8 @@ lcb_git_tag_latest("master")
 lcb_git_tag("2.14.0")
 lcb_external_source_paths("mediastreamer2")
 lcb_groupable(YES)
+lcb_sanitizable(YES)
+lcb_package_source(YES)
 lcb_spec_file("mediastreamer2.spec")
 lcb_rpmbuild_name("mediastreamer")
 
@@ -51,17 +53,18 @@ lcb_cmake_options(
 	"-DENABLE_G729=${ENABLE_G729}"
 	"-DENABLE_G729B_CNG=${ENABLE_G729B_CNG}"
 	"-DENABLE_JPEG=${ENABLE_JPEG}"
+	"-DENABLE_QRCODE=${ENABLE_QRCODE}"
 )
-if(ENABLE_GSM AND LINPHONE_BUILDER_BUILD_DEPENDENCIES)
+if(ENABLE_GSM)
 	lcb_dependencies("gsm")
 endif()
-if(ENABLE_OPUS AND LINPHONE_BUILDER_BUILD_DEPENDENCIES)
+if(ENABLE_OPUS)
 	lcb_dependencies("opus")
 endif()
-if(ENABLE_SPEEX AND LINPHONE_BUILDER_BUILD_DEPENDENCIES)
+if(ENABLE_SPEEX)
 	lcb_dependencies("speex")
 endif()
-if(ENABLE_BV16 AND LINPHONE_BUILDER_BUILD_DEPENDENCIES)
+if(ENABLE_BV16)
 	lcb_dependencies("bv16")
 endif()
 if(ENABLE_G729 OR ENABLE_G729B_CNG)
@@ -70,6 +73,9 @@ endif()
 if(ENABLE_JPEG)
 	lcb_dependencies("turbo-jpeg")
 endif()
+if(ENABLE_QRCODE)
+	lcb_dependencies("zxing")
+endif()
 
 lcb_cmake_options("-DENABLE_VIDEO=${ENABLE_VIDEO}")
 if(ENABLE_VIDEO)
@@ -77,14 +83,14 @@ if(ENABLE_VIDEO)
 		"-DENABLE_FFMPEG=${ENABLE_FFMPEG}"
 		"-DENABLE_VPX=${ENABLE_VPX}"
 	)
-	if(ENABLE_FFMPEG AND LINPHONE_BUILDER_BUILD_DEPENDENCIES)
+	if(ENABLE_FFMPEG)
 		if(ANDROID)
 			lcb_dependencies("ffmpegandroid")
 		else()
 			lcb_dependencies("ffmpeg")
 		endif()
 	endif()
-	if(ENABLE_VPX AND LINPHONE_BUILDER_BUILD_DEPENDENCIES)
+	if(ENABLE_VPX)
 		lcb_dependencies("vpx")
 	endif()
 endif()
@@ -101,13 +107,14 @@ lcb_cmake_options(
 	"-DENABLE_SRTP=${ENABLE_SRTP}"
 	"-DENABLE_ZRTP=${ENABLE_ZRTP}"
 )
-if(ENABLE_SRTP AND LINPHONE_BUILDER_BUILD_DEPENDENCIES)
+if(ENABLE_SRTP)
 	lcb_dependencies("srtp")
 endif()
 if(ENABLE_ZRTP)
 	lcb_dependencies("bzrtp")
 endif()
 
-if(ENABLE_V4L AND LINPHONE_BUILDER_BUILD_DEPENDENCIES)
+if(ENABLE_V4L)
 	lcb_dependencies("v4l")
 endif()
+

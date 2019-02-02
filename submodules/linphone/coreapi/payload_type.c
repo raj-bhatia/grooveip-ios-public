@@ -19,7 +19,13 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 #include <string.h>
 #include <ortp/payloadtype.h>
+
 #include "linphone/payload_type.h"
+
+#include "c-wrapper/c-wrapper.h"
+#include "utils/payload-type-handler.h"
+
+// TODO: From coreapi. Remove me later.
 #include "private.h"
 
 struct _LinphonePayloadType {
@@ -104,11 +110,7 @@ char *linphone_payload_type_get_description(const LinphonePayloadType *pt) {
 static const char *_linphone_core_get_payload_type_codec_description(const LinphoneCore *lc, const OrtpPayloadType *pt) {
 	if (ms_factory_codec_supported(lc->factory, pt->mime_type)){
 		MSFilterDesc *desc=ms_factory_get_encoder(lc->factory, pt->mime_type);
-#ifdef ENABLE_NLS
-		return dgettext("mediastreamer",desc->text);
-#else
 		return desc->text;
-#endif
 	}
 	return NULL;
 }
@@ -134,16 +136,16 @@ const char *linphone_payload_type_get_encoder_description(const LinphonePayloadT
 }
 
 static int _linphone_core_get_payload_type_normal_bitrate(const LinphoneCore *lc, const OrtpPayloadType *pt) {
-	int maxbw = get_min_bandwidth(linphone_core_get_download_bandwidth(lc),
+	int maxbw = LinphonePrivate::PayloadTypeHandler::getMinBandwidth(linphone_core_get_download_bandwidth(lc),
 					linphone_core_get_upload_bandwidth(lc));
 	if (pt->type==PAYLOAD_AUDIO_CONTINUOUS || pt->type==PAYLOAD_AUDIO_PACKETIZED){
-		return get_audio_payload_bandwidth(lc, pt, maxbw);
+		return LinphonePrivate::PayloadTypeHandler::getAudioPayloadTypeBandwidth(pt, maxbw);
 	}else if (pt->type==PAYLOAD_VIDEO){
 		int video_bw;
 		if (maxbw<=0) {
 			video_bw=1500; /*default bitrate for video stream when no bandwidth limit is set, around 1.5 Mbit/s*/
 		}else{
-			video_bw=get_remaining_bandwidth_for_video(maxbw,lc->audio_bw);
+			video_bw=LinphonePrivate::PayloadTypeHandler::getRemainingBandwidthForVideo(maxbw,lc->audio_bw);
 		}
 		return video_bw;
 	}
@@ -258,21 +260,9 @@ bool_t linphone_payload_type_is_vbr(const LinphonePayloadType *pt) {
 }
 
 bool_t _linphone_core_check_payload_type_usability(const LinphoneCore *lc, const OrtpPayloadType *pt) {
-	int maxbw=get_min_bandwidth(linphone_core_get_download_bandwidth(lc),
+	int maxbw=LinphonePrivate::PayloadTypeHandler::getMinBandwidth(linphone_core_get_download_bandwidth(lc),
 					linphone_core_get_upload_bandwidth(lc));
-	bool_t ret=linphone_core_is_payload_type_usable_for_bandwidth(lc, pt, maxbw);
-	if ((pt->type==PAYLOAD_AUDIO_CONTINUOUS || pt->type==PAYLOAD_AUDIO_PACKETIZED)
-		&& lc->sound_conf.capt_sndcard
-		&& !(ms_snd_card_get_capabilities(lc->sound_conf.capt_sndcard) & MS_SND_CARD_CAP_BUILTIN_ECHO_CANCELLER)
-		&& linphone_core_echo_cancellation_enabled(lc)
-		&& (pt->clock_rate!=16000 && pt->clock_rate!=8000)
-		&& strcasecmp(pt->mime_type,"opus")!=0
-		&& ms_factory_lookup_filter_by_name(lc->factory, "MSWebRTCAEC")!=NULL){
-		ms_warning("Payload type %s/%i cannot be used because software echo cancellation is required but is unable to operate at this rate.",
-			   pt->mime_type,pt->clock_rate);
-		ret=FALSE;
-	}
-	return ret;
+	return linphone_core_is_payload_type_usable_for_bandwidth(lc, pt, maxbw);
 }
 
 bool_t linphone_core_check_payload_type_usability(LinphoneCore *lc, const OrtpPayloadType *pt) {
@@ -305,3 +295,15 @@ BELLE_SIP_INSTANCIATE_VPTR(LinphonePayloadType, belle_sip_object_t,
 	NULL, // marshale
 	TRUE // unown
 );
+
+
+void payload_type_set_enable(OrtpPayloadType *pt, bool_t value) {
+	if (value)
+		payload_type_set_flag(pt, PAYLOAD_TYPE_ENABLED);
+	else
+		payload_type_unset_flag(pt, PAYLOAD_TYPE_ENABLED);
+}
+
+bool_t payload_type_enabled(const OrtpPayloadType *pt) {
+	return (pt->flags & PAYLOAD_TYPE_ENABLED);
+}

@@ -20,7 +20,7 @@
 #include "linphone/core.h"
 #include "liblinphone_tester.h"
 #include "linphone/lpconfig.h"
-#include "private.h"
+#include "tester_utils.h"
 
 
 #if HAVE_SIPP
@@ -39,7 +39,7 @@ void check_rtcp(LinphoneCall *call) {
 		}
 		linphone_call_stats_unref(audio_stats);
 		if (video_stats) linphone_call_stats_unref(video_stats);
-		wait_for_until(call->core, NULL, NULL, 0, 20); /*just to sleep while iterating*/
+		wait_for_until(linphone_call_get_core(call), NULL, NULL, 0, 20); /*just to sleep while iterating*/
 	} while (!liblinphone_tester_clock_elapsed(&ts, 15000));
 
 	audio_stats = linphone_call_get_audio_stats(call);
@@ -58,15 +58,18 @@ FILE *sip_start(const char *senario, const char* dest_username, const char *pass
 	char *dest;
 	char *command;
 	FILE *file;
-
+	char local_ip[64];
 	if (linphone_address_get_port(dest_addres)>0)
 		dest = ms_strdup_printf("%s:%i",linphone_address_get_domain(dest_addres),linphone_address_get_port(dest_addres));
 	else
 		dest = ms_strdup_printf("%s",linphone_address_get_domain(dest_addres));
+	
+	linphone_core_get_local_ip_for(AF_INET, linphone_address_get_domain(dest_addres), local_ip);
 	//until errors logs are handled correctly and stop breaks output, they will be DISABLED
-	command = ms_strdup_printf(SIPP_COMMAND" -sf %s -s %s %s -trace_err -trace_msg -rtp_echo -m 1 -d 1000 -ap %s 2>/dev/null",senario
+	command = ms_strdup_printf(SIPP_COMMAND" -sf %s -s %s %s -i %s -trace_err -trace_msg -rtp_echo -m 1 -d 1000 -ap %s 2>/dev/null",senario
 								,dest_username
 								,dest
+							    ,local_ip
 								,(passwd?passwd:"none"));
 
 	ms_message("Starting sipp command [%s]",command);
@@ -90,7 +93,7 @@ static FILE *sip_start_recv(const char *senario) {
 	return file;
 }
 
-static void dest_server_server_resolved(void *data, const char *name, struct addrinfo *ai_list) {
+static void dest_server_server_resolved(void *data, const char *name, struct addrinfo *ai_list, uint32_t ttl) {
 	*(struct addrinfo **)data =ai_list;
 }
 
@@ -100,17 +103,17 @@ LinphoneAddress * linphone_core_manager_resolve(LinphoneCoreManager *mgr, const 
 	int err;
 	int port = linphone_address_get_port(source);
 	LinphoneAddress * dest;
-	
-	sal_resolve_a(	mgr->lc->sal
+
+	sal_resolve_a(linphone_core_get_sal(mgr->lc)
 	 ,linphone_address_get_domain(source)
 	 ,linphone_address_get_port(source)
 	 ,AF_INET
-	 ,(SalResolverCallback)dest_server_server_resolved
+	 ,dest_server_server_resolved
 	 ,&addrinfo);
-	
+
 	 dest=linphone_address_new(NULL);
 	 
-	 wait_for(mgr->lc, mgr->lc, (int*)&addrinfo, 1);
+	 wait_for_until(mgr->lc, mgr->lc, (int*)&addrinfo, 1,2000);
 	 err=bctbx_getnameinfo((struct sockaddr*)addrinfo->ai_addr,addrinfo->ai_addrlen,ipstring,INET6_ADDRSTRLEN,NULL,0,NI_NUMERICHOST);
 	 if (err !=0 ){
 		 ms_error("linphone_core_manager_resolve(): getnameinfo error %s", gai_strerror(err));
@@ -118,7 +121,7 @@ LinphoneAddress * linphone_core_manager_resolve(LinphoneCoreManager *mgr, const 
 	 linphone_address_set_domain(dest, ipstring);
 	 if (port > 0)
 		linphone_address_set_port(dest, port);
-	
+
 	return dest;
 }
 
@@ -141,9 +144,11 @@ static void sip_update_within_icoming_reinvite_with_no_sdp(void) {
 
 	if (sipp_out) {
 		BC_ASSERT_TRUE(wait_for(mgr->lc, mgr->lc, &mgr->stat.number_of_LinphoneCallIncomingReceived, 1));
-		linphone_call_accept(linphone_core_get_current_call(mgr->lc));
-		BC_ASSERT_TRUE(wait_for(mgr->lc, mgr->lc, &mgr->stat.number_of_LinphoneCallStreamsRunning, 2));
-		BC_ASSERT_TRUE(wait_for(mgr->lc, mgr->lc, &mgr->stat.number_of_LinphoneCallEnd, 1));
+		if (linphone_core_get_current_call(mgr->lc)) {
+			linphone_call_accept(linphone_core_get_current_call(mgr->lc));
+			BC_ASSERT_TRUE(wait_for(mgr->lc, mgr->lc, &mgr->stat.number_of_LinphoneCallStreamsRunning, 2));
+			BC_ASSERT_TRUE(wait_for(mgr->lc, mgr->lc, &mgr->stat.number_of_LinphoneCallEnd, 1));
+		}
 		pclose(sipp_out);
 	}
 	linphone_core_manager_destroy(mgr);
@@ -166,7 +171,7 @@ static void call_with_audio_mline_before_video_in_sdp(void) {
 	linphone_core_iterate(mgr->lc);
 
 	scen = bc_tester_res("sipp/call_with_audio_mline_before_video_in_sdp.xml");
-
+	
 	sipp_out = sip_start(scen, linphone_address_get_username(mgr->identity), NULL,  mgr->identity);
 
 	if (sipp_out) {
@@ -176,9 +181,9 @@ static void call_with_audio_mline_before_video_in_sdp(void) {
 		if (call) {
 			linphone_call_accept(call);
 			BC_ASSERT_TRUE(wait_for(mgr->lc, mgr->lc, &mgr->stat.number_of_LinphoneCallStreamsRunning, 1));
-			BC_ASSERT_EQUAL(call->main_audio_stream_index, 0, int, "%d");
-			BC_ASSERT_EQUAL(call->main_video_stream_index, 1, int, "%d");
-			BC_ASSERT_TRUE(call->main_text_stream_index > 1);
+			BC_ASSERT_EQUAL(_linphone_call_get_main_audio_stream_index(call), 0, int, "%d");
+			BC_ASSERT_EQUAL(_linphone_call_get_main_video_stream_index(call), 1, int, "%d");
+			BC_ASSERT_TRUE(_linphone_call_get_main_text_stream_index(call) > 1);
 			BC_ASSERT_TRUE(linphone_call_log_video_enabled(linphone_call_get_call_log(call)));
 
 			check_rtcp(call);
@@ -217,9 +222,9 @@ static void call_with_video_mline_before_audio_in_sdp(void) {
 		if (call) {
 			linphone_call_accept(call);
 			BC_ASSERT_TRUE(wait_for(mgr->lc, mgr->lc, &mgr->stat.number_of_LinphoneCallStreamsRunning, 1));
-			BC_ASSERT_EQUAL(call->main_audio_stream_index, 1, int, "%d");
-			BC_ASSERT_EQUAL(call->main_video_stream_index, 0, int, "%d");
-			BC_ASSERT_TRUE(call->main_text_stream_index > 1);
+			BC_ASSERT_EQUAL(_linphone_call_get_main_audio_stream_index(call), 1, int, "%d");
+			BC_ASSERT_EQUAL(_linphone_call_get_main_video_stream_index(call), 0, int, "%d");
+			BC_ASSERT_TRUE(_linphone_call_get_main_text_stream_index(call) > 1);
 			BC_ASSERT_TRUE(linphone_call_log_video_enabled(linphone_call_get_call_log(call)));
 
 			check_rtcp(call);
@@ -258,9 +263,9 @@ static void call_with_multiple_audio_mline_in_sdp(void) {
 		if (call) {
 			linphone_call_accept(call);
 			BC_ASSERT_TRUE(wait_for(mgr->lc, mgr->lc, &mgr->stat.number_of_LinphoneCallStreamsRunning, 1));
-			BC_ASSERT_EQUAL(call->main_audio_stream_index, 0, int, "%d");
-			BC_ASSERT_EQUAL(call->main_video_stream_index, 2, int, "%d");
-			BC_ASSERT_TRUE(call->main_text_stream_index > 2);
+			BC_ASSERT_EQUAL(_linphone_call_get_main_audio_stream_index(call), 0, int, "%d");
+			BC_ASSERT_EQUAL(_linphone_call_get_main_video_stream_index(call), 2, int, "%d");
+			BC_ASSERT_TRUE(_linphone_call_get_main_text_stream_index(call) > 2);
 			BC_ASSERT_TRUE(linphone_call_log_video_enabled(linphone_call_get_call_log(call)));
 
 			check_rtcp(call);
@@ -299,9 +304,9 @@ static void call_with_multiple_video_mline_in_sdp(void) {
 		if (call) {
 			linphone_call_accept(call);
 			BC_ASSERT_TRUE(wait_for(mgr->lc, mgr->lc, &mgr->stat.number_of_LinphoneCallStreamsRunning, 1));
-			BC_ASSERT_EQUAL(call->main_audio_stream_index, 0, int, "%d");
-			BC_ASSERT_EQUAL(call->main_video_stream_index, 1, int, "%d");
-			BC_ASSERT_TRUE(call->main_text_stream_index > 3);
+			BC_ASSERT_EQUAL(_linphone_call_get_main_audio_stream_index(call), 0, int, "%d");
+			BC_ASSERT_EQUAL(_linphone_call_get_main_video_stream_index(call), 1, int, "%d");
+			BC_ASSERT_TRUE(_linphone_call_get_main_text_stream_index(call) > 3);
 			BC_ASSERT_TRUE(linphone_call_log_video_enabled(linphone_call_get_call_log(call)));
 
 			check_rtcp(call);
@@ -363,12 +368,23 @@ static test_t tests[] = {
 };
 #endif
 
+static bool_t previous_liblinphonetester_ipv6;
+static void before_each(void) {
+	previous_liblinphonetester_ipv6=liblinphonetester_ipv6;
+	liblinphonetester_ipv6=FALSE; /*sipp  do not support ipv6 and remote port*/
+	liblinphone_tester_before_each();
+}
+static void after_each(void) {
+	liblinphonetester_ipv6=previous_liblinphonetester_ipv6;
+	liblinphone_tester_after_each();
+}
+
 test_suite_t complex_sip_call_test_suite = {
 	"Complex SIP Case",
 	NULL,
 	NULL,
-	liblinphone_tester_before_each,
-	liblinphone_tester_after_each,
+	before_each,
+	after_each,
 #if HAVE_SIPP
 	sizeof(tests) / sizeof(tests[0]),
 	tests

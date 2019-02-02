@@ -21,7 +21,7 @@
 ############################################################################
 
 cmake_minimum_required(VERSION 3.0)
-project(oRTP VERSION 1.0.1)
+project(oRTP VERSION 1.0.2)
 
 
 set(ORTP_MAJOR_VERSION ${PROJECT_VERSION_MAJOR})
@@ -46,7 +46,6 @@ include(CheckIncludeFile)
 include(CheckFunctionExists)
 include(GNUInstallDirs)
 
-add_subdirectory(build)
 
 if(NOT CMAKE_INSTALL_RPATH AND CMAKE_INSTALL_PREFIX)
 	set(CMAKE_INSTALL_RPATH ${CMAKE_INSTALL_FULL_LIBDIR})
@@ -129,7 +128,7 @@ if(MSVC)
 else()
 	list(APPEND STRICT_OPTIONS_CPP "-Wall" "-Wuninitialized")
 	list(APPEND STRICT_OPTIONS_C "-Wdeclaration-after-statement" "-Wstrict-prototypes" "-Wno-error=strict-prototypes")
-	if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+	if(CMAKE_C_COMPILER_ID MATCHES "Clang")
 		list(APPEND STRICT_OPTIONS_CPP "-Qunused-arguments" "-Wno-array-bounds")
 	endif()
 	if(APPLE)
@@ -191,6 +190,10 @@ set(ORTPDEPS_LIBS )
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ortp.pc.in ${CMAKE_CURRENT_BINARY_DIR}/ortp.pc)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/ortp.pc DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
 
+
+add_subdirectory(build)
+
+
 include(CMakePackageConfigHelpers)
 write_basic_package_version_file(
 	"${CMAKE_CURRENT_BINARY_DIR}/ORTPConfigVersion.cmake"
@@ -215,7 +218,7 @@ install(FILES
 	"${CMAKE_CURRENT_BINARY_DIR}/ORTPConfigVersion.cmake"
 	DESTINATION ${CONFIG_PACKAGE_LOCATION}
 )
-install(FILES 	"${CMAKE_CURRENT_SOURCE_DIR}/README" 
+install(FILES 	"${CMAKE_CURRENT_SOURCE_DIR}/README.md" 
 	"${CMAKE_CURRENT_SOURCE_DIR}/ChangeLog" 
 	"${CMAKE_CURRENT_SOURCE_DIR}/COPYING" 
 	"${CMAKE_CURRENT_SOURCE_DIR}/AUTHORS" 

@@ -16,7 +16,12 @@
 #include <cstdio>
 #include <cstdlib>
 
-#if defined(__GLIBCXX__) && !defined(__UCLIBC__)
+#if defined(__GLIBCXX__) && !defined(__UCLIBC__) && !defined(ANDROID)
+# define USE_EXECINFO
+#endif
+
+
+#ifdef USE_EXECINFO
 #include <cxxabi.h>
 #include <execinfo.h>
 #endif
@@ -55,7 +60,7 @@ void PrintError(const char* format, ...) {
 // to get usable symbols on Linux. This is copied from V8. Chromium has a more
 // advanced stace trace system; also more difficult to copy.
 void DumpBacktrace() {
-#if defined(__GLIBCXX__) && !defined(__UCLIBC__)
+#ifdef USE_EXECINFO
   void* trace[100];
   int size = backtrace(trace, sizeof(trace) / sizeof(*trace));
   char** symbols = backtrace_symbols(trace, size);

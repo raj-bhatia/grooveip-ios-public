@@ -22,6 +22,13 @@
 
 @implementation TabBarView
 
+#if 1	// Changed Linphone code - Keep track of SMS (Chat) tab
+static BOOL _inSmsTab = FALSE;
+
++ (BOOL) inSmsTab { return _inSmsTab; }
++ (void) setInSmsTab : (BOOL)inSmsTab { _inSmsTab = inSmsTab; }
+#endif
+
 #pragma mark - ViewController Functions
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -80,6 +87,9 @@
 
 - (void)updateUnreadMessage:(BOOL)appear {
 	int unreadMessage = [LinphoneManager unreadMessageCount];
+#if 1	// Changed Linphone code - MMS
+	LOGI(@"TabBarView updateUnreadMessage: Unread %d", unreadMessage);
+#endif
 	if (unreadMessage > 0) {
 		_chatNotificationLabel.text = [NSString stringWithFormat:@"%i", unreadMessage];
 		[_chatNotificationView startAnimating:appear];
@@ -98,6 +108,21 @@
 }
 
 - (void)updateSelectedButton:(UICompositeViewDescription *)view {
+#if 1	// Changed Linphone code - Keep track of SMS (Chat) tab
+	if (TRUE == TabBarView.inSmsTab) {
+		_chatButton.selected = TRUE;
+		_historyButton.selected = FALSE;
+		_contactsButton.selected = FALSE;
+		_dialerButton.selected = FALSE;
+	} else {
+		_chatButton.selected = FALSE;
+		_historyButton.selected = [view equal:HistoryListView.compositeViewDescription] ||
+								  [view equal:HistoryDetailsView.compositeViewDescription];
+		_contactsButton.selected = [view equal:ContactsListView.compositeViewDescription] ||
+								   [view equal:ContactDetailsView.compositeViewDescription];
+		_dialerButton.selected = [view equal:DialerView.compositeViewDescription];
+	}
+#else
 	_historyButton.selected = [view equal:HistoryListView.compositeViewDescription] ||
 							  [view equal:HistoryDetailsView.compositeViewDescription];
 	_contactsButton.selected = [view equal:ContactsListView.compositeViewDescription] ||
@@ -105,7 +130,10 @@
 	_dialerButton.selected = [view equal:DialerView.compositeViewDescription];
 	_chatButton.selected = [view equal:ChatsListView.compositeViewDescription] ||
 						   [view equal:ChatConversationCreateView.compositeViewDescription] ||
+						   [view equal:ChatConversationInfoView.compositeViewDescription] ||
+						   [view equal:ChatConversationImdnView.compositeViewDescription] ||
 						   [view equal:ChatConversationView.compositeViewDescription];
+#endif
 	CGRect selectedNewFrame = _selectedButtonImage.frame;
 	if ([self viewIsCurrentlyPortrait]) {
 		selectedNewFrame.origin.x =
@@ -142,6 +170,9 @@
 #pragma mark - Action Functions
 
 - (IBAction)onHistoryClick:(id)event {
+#if 1	// Changed Linphone code - Keep track of SMS (Chat) tab
+	TabBarView.inSmsTab = FALSE;
+#endif
 	linphone_core_reset_missed_calls_count(LC);
 	[self update:FALSE];
 	[PhoneMainView.instance updateApplicationBadgeNumber];
@@ -149,6 +180,9 @@
 }
 
 - (IBAction)onContactsClick:(id)event {
+#if 1	// Changed Linphone code - Keep track of SMS (Chat) tab
+	TabBarView.inSmsTab = FALSE;
+#endif
 	[ContactSelection setAddAddress:nil];
 	[ContactSelection enableEmailFilter:FALSE];
 	[ContactSelection setNameOrEmailFilter:nil];
@@ -156,6 +190,9 @@
 }
 
 - (IBAction)onDialerClick:(id)event {
+#if 1	// Changed Linphone code - Keep track of SMS (Chat) tab
+	TabBarView.inSmsTab = FALSE;
+#endif
 	[PhoneMainView.instance changeCurrentView:DialerView.compositeViewDescription];
 }
 
@@ -164,6 +201,9 @@
 }
 
 - (IBAction)onChatClick:(id)event {
+#if 1	// Changed Linphone code - Keep track of SMS (Chat) tab
+	TabBarView.inSmsTab = TRUE;
+#endif
 	[PhoneMainView.instance changeCurrentView:ChatsListView.compositeViewDescription];
 }
 

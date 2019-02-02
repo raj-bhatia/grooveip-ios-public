@@ -363,6 +363,8 @@ MS2_PUBLIC void ms_video_set_scaler_impl(MSScalerDesc *desc);
 
 MS2_PUBLIC mblk_t *copy_ycbcrbiplanar_to_true_yuv_with_rotation(MSYuvBufAllocator *allocator, const uint8_t* y, const uint8_t* cbcr, int rotation, int w, int h, int y_byte_per_row,int cbcr_byte_per_row, bool_t uFirstvSecond);
 
+MS2_PUBLIC mblk_t *copy_yuv_with_rotation(MSYuvBufAllocator *allocator, const uint8_t* y, const uint8_t* u, const uint8_t* v, int rotation, int w, int h, int y_byte_per_row, int u_byte_per_row, int v_byte_per_row);
+
 /*** Encoder Helpers ***/
 /* Frame rate controller */
 struct _MSFrameRateController {
@@ -407,6 +409,25 @@ MS2_PUBLIC MSVideoConfiguration ms_video_find_best_configuration_for_bitrate(con
  * @return The best video configuration found in the given list.
  */
 MS2_PUBLIC MSVideoConfiguration ms_video_find_best_configuration_for_size(const MSVideoConfiguration *vconf_list, MSVideoSize vsize, int cpucount);
+
+/**
+ * Find the worst video configuration from a list of configuration according to a given video size.
+ * @param[in] vconf_list The list of video configurations to choose from.
+ * @param[in] vsize The maximum video size the chosen configuration is allowed to use.
+ * @param[in] cpucount the number of cpu that can be used for this encoding.
+ * @return The best video configuration found in the given list.
+ */
+MS2_PUBLIC MSVideoConfiguration ms_video_find_worst_configuration_for_size(const MSVideoConfiguration *vconf_list, MSVideoSize vsize, int cpucount);
+
+MS2_PUBLIC MSVideoConfiguration ms_video_find_best_configuration_for_size_and_bitrate(const MSVideoConfiguration *vconf_list, MSVideoSize vsize, int cpu_count, int bitrate);
+
+/**
+ * Compares two video configurations and tell if they are equals.
+ * @param[in] vconf1 The first video configuration.
+ * @param[in] vconf2 The second video configuration.
+ * @return true if both configurations are equal, false otherwise.
+ */
+MS2_PUBLIC bool_t ms_video_configuratons_equal(const MSVideoConfiguration *vconf1, const MSVideoConfiguration *vconf2);
 
 #ifdef __cplusplus
 }

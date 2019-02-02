@@ -21,8 +21,8 @@
 
 #include "belcard_utils.hpp"
 #include "belcard_property.hpp"
-#include <belr/grammarbuilder.hh>
-#include <belr/abnf.hh>
+#include <belr/grammarbuilder.h>
+#include <belr/abnf.h>
 
 #include <string>
 #include <sstream>
@@ -33,31 +33,36 @@ namespace belcard {
 	public:
 		BELCARD_PUBLIC static std::shared_ptr<BelCardPhoneNumber> parse(const std::string& input);
 		BELCARD_PUBLIC static void setHandlerAndCollectors(belr::Parser<std::shared_ptr<BelCardGeneric>> *parser);
-		
+
 		BELCARD_PUBLIC BelCardPhoneNumber();
 	};
-	
+
 	class BelCardEmail : public BelCardProperty {
 	public:
 		BELCARD_PUBLIC static std::shared_ptr<BelCardEmail> parse(const std::string& input);
 		BELCARD_PUBLIC static void setHandlerAndCollectors(belr::Parser<std::shared_ptr<BelCardGeneric>> *parser);
-		
+
 		BELCARD_PUBLIC BelCardEmail();
 	};
-	
+
 	class BelCardImpp : public BelCardProperty {
+	private:
+		std::string _escaped_value;
 	public:
 		BELCARD_PUBLIC static std::shared_ptr<BelCardImpp> parse(const std::string& input);
 		BELCARD_PUBLIC static void setHandlerAndCollectors(belr::Parser<std::shared_ptr<BelCardGeneric>> *parser);
-		
+
+		BELCARD_PUBLIC void setValue(const std::string &value) override;
+		BELCARD_PUBLIC void serialize(std::ostream &output) const override;
+
 		BELCARD_PUBLIC BelCardImpp();
 	};
-	
+
 	class BelCardLang : public BelCardProperty {
 	public:
 		BELCARD_PUBLIC static std::shared_ptr<BelCardLang> parse(const std::string& input);
 		BELCARD_PUBLIC static void setHandlerAndCollectors(belr::Parser<std::shared_ptr<BelCardGeneric>> *parser);
-		
+
 		BELCARD_PUBLIC BelCardLang();
 	};
 }

@@ -21,6 +21,7 @@
 ############################################################################
 
 # Define options that are specific to the android config
+lcb_add_option("Arch suffix" "Append the android abi to shared libraries" ON)
 lcb_add_dependent_option("Embedded OpenH264" "Embed the openh264 library instead of downloading it from Cisco." "${DEFAULT_VALUE_ENABLE_EMBEDDED_OPENH264}" "ENABLE_OPENH264" OFF)
 
 
@@ -34,7 +35,7 @@ set(DEFAULT_VALUE_ENABLE_JPEG ON)
 set(DEFAULT_VALUE_ENABLE_MBEDTLS ON)
 set(DEFAULT_VALUE_ENABLE_MKV ON)
 set(DEFAULT_VALUE_ENABLE_OPUS ON)
-set(DEFAULT_VALUE_ENABLE_SILK ON)
+set(DEFAULT_VALUE_ENABLE_SILK OFF)
 set(DEFAULT_VALUE_ENABLE_SPEEX ON)
 set(DEFAULT_VALUE_ENABLE_G729 ${DEFAULT_VALUE_ENABLE_GPL_THIRD_PARTIES})
 set(DEFAULT_VALUE_ENABLE_G729B_CNG OFF)
@@ -44,9 +45,11 @@ set(DEFAULT_VALUE_ENABLE_VCARD ON)
 set(DEFAULT_VALUE_ENABLE_VIDEO ON)
 set(DEFAULT_VALUE_ENABLE_VPX ON)
 set(DEFAULT_VALUE_ENABLE_WEBRTC_AECM ON)
+set(DEFAULT_VALUE_ENABLE_WEBRTC_AEC ON)
 set(DEFAULT_VALUE_ENABLE_ZRTP ON)
 set(DEFAULT_VALUE_ENABLE_LIME ON)
 set(DEFAULT_VALUE_ENABLE_TOOLS OFF)
+set(DEFAULT_VALUE_ENABLE_JAVA_WRAPPER ON)
 set(ENABLE_NLS NO CACHE BOOL "" FORCE)
 
 set(DEFAULT_VALUE_CMAKE_LINKING_TYPE "-DENABLE_STATIC=YES" "-DENABLE_SHARED=NO")
@@ -56,15 +59,17 @@ set(DEFAULT_VALUE_CMAKE_PLUGIN_LINKING_TYPE "-DENABLE_STATIC=NO" "-DENABLE_SHARE
 # Global configuration
 set(LINPHONE_BUILDER_HOST "${CMAKE_SYSTEM_PROCESSOR}-linux-android")
 set(CMAKE_INSTALL_RPATH "$ORIGIN")
-if(CMAKE_SYSTEM_PROCESSOR STREQUAL "armeabi" AND ENABLE_VIDEO)
-	message(STATUS "Disabling video for armv6")
-	set(ENABLE_VIDEO NO CACHE BOOL "" FORCE)
-	set(ENABLE_FFMPEG NO CACHE BOOL "" FORCE)
-	set(ENABLE_OPENH264 NO CACHE BOOL "" FORCE)
-	set(ENABLE_VPX NO CACHE BOOL "" FORCE)
-	set(ENABLE_X264 NO CACHE BOOL "" FORCE)
+if(CMAKE_SYSTEM_PROCESSOR STREQUAL "armv5te")
+	if(ENABLE_VIDEO)
+		message(STATUS "Disabling video for armv6")
+		set(ENABLE_VIDEO NO CACHE BOOL "" FORCE)
+		set(ENABLE_FFMPEG NO CACHE BOOL "" FORCE)
+		set(ENABLE_OPENH264 NO CACHE BOOL "" FORCE)
+		set(ENABLE_VPX NO CACHE BOOL "" FORCE)
+		set(ENABLE_X264 NO CACHE BOOL "" FORCE)
+	endif()
+	set(ENABLE_WEBRTC_AEC NO CACHE BOOL "" FORCE)
 endif()
-
 
 
 # Include builders
@@ -81,6 +86,9 @@ lcb_builder_cmake_options(belcard "-DENABLE_UNIT_TESTS=NO")
 
 # belle-sip
 lcb_builder_cmake_options(bellesip "-DENABLE_TESTS=NO")
+
+# belr
+lcb_builder_cmake_options(belr "-DENABLE_TESTS=NO")
 
 # bzrtp
 lcb_builder_cmake_options(bzrtp "-DENABLE_TESTS=NO")
@@ -138,6 +146,9 @@ lcb_builder_linking_type(ortp "-DENABLE_STATIC=NO" "-DENABLE_SHARED=YES")
 # polarssl
 lcb_builder_linking_type(polarssl "-DUSE_SHARED_POLARSSL_LIBRARY=NO")
 
+# soci
+lcb_builder_linking_type(soci "-DSOCI_STATIC=YES" "-DSOCI_SHARED=NO")
+
 # speex
 lcb_builder_cmake_options(speex "-DENABLE_FLOAT_API=NO")
 lcb_builder_cmake_options(speex "-DENABLE_FIXED_POINT=YES")
@@ -154,9 +165,15 @@ lcb_builder_install_target(x264 "install-lib-static")
 
 
 # Copy c++ library to install prefix
-file(COPY "${CMAKE_ANDROID_NDK}/sources/cxx-stl/gnu-libstdc++/${CMAKE_CXX_ANDROID_TOOLCHAIN_VERSION}/libs/${CMAKE_ANDROID_ARCH_ABI}/libgnustl_shared.so"
-	DESTINATION "${CMAKE_INSTALL_PREFIX}/lib"
-)
+if(CMAKE_ANDROID_NDK_VERSION VERSION_LESS 16)
+	file(COPY "${CMAKE_ANDROID_NDK}/sources/cxx-stl/gnu-libstdc++/${CMAKE_CXX_ANDROID_TOOLCHAIN_VERSION}/libs/${CMAKE_ANDROID_ARCH_ABI}/libgnustl_shared.so"
+		DESTINATION "${CMAKE_INSTALL_PREFIX}/lib"
+	)
+else()
+	file(COPY "${CMAKE_ANDROID_NDK}/sources/cxx-stl/llvm-libc++/libs/${CMAKE_ANDROID_ARCH_ABI}/libc++_shared.so"
+		DESTINATION "${CMAKE_INSTALL_PREFIX}/lib"
+	)
+endif()
 
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")

@@ -313,7 +313,7 @@ MS2_PUBLIC MS2_DEPRECATED MSList *ms_filter_lookup_by_interface(MSFilterInterfac
 
 /**
  * Create encoder filter according to codec name.
- 
+
  * @param mime    A string indicating the codec.
  *
  * @return a MSFilter if successfull, NULL otherwise.
@@ -438,7 +438,7 @@ MS2_PUBLIC bool_t ms_filter_has_method(MSFilter *f, unsigned int id);
  * Returns whether a filter implements a given interface.
  * @param f a MSFilter object
  * @param id an interface id.
- * 
+ *
  * Returns TRUE if interface is implemented, FALSE, otherwise.
 **/
 MS2_PUBLIC bool_t ms_filter_implements_interface(MSFilter *f, MSFilterInterfaceId id);
@@ -447,23 +447,10 @@ MS2_PUBLIC bool_t ms_filter_implements_interface(MSFilter *f, MSFilterInterfaceI
  * Returns whether a filter implements a given interface, based on the filter's descriptor.
  * @param f a MSFilter object
  * @param id an interface id.
- * 
+ *
  * Returns TRUE if interface is implemented, FALSE, otherwise.
 **/
 MS2_PUBLIC bool_t ms_filter_desc_implements_interface(MSFilterDesc *desc, MSFilterInterfaceId id);
-
-/**
- * Set a callback on filter's to be informed of private filter's event.
- * This callback is called from the filter's MSTicker, unless a global event queue
- * is created to receive all filter's notification asynchronously.
- * See ms_event_queue_new() for details.
- *
- * @param f        A MSFilter object.
- * @param fn       A MSFilterNotifyFunc that will be called.
- * @param userdata A pointer to private data.
- * @deprecated use ms_filter_add_notify_callback()
- *
- */
 
 
 /**
@@ -609,7 +596,7 @@ MS2_PUBLIC MS2_DEPRECATED void ms_filter_log_statistics(void);
 the method index (_cnt_) and the argument size */
 /* I hope using this to avoid type mismatch (calling a method on the wrong filter)*/
 #define MS_FILTER_METHOD_ID(_id_,_cnt_,_argsize_) \
-	(  (((unsigned long)(_id_)) & 0xFFFF)<<16 | (_cnt_<<8) | (_argsize_ & 0xFF ))
+	(unsigned int)(((((unsigned int)(_id_)) & 0xFFFF)<<16) | (((unsigned int)(_cnt_))<<8) | (((unsigned int)_argsize_) & 0xFF))
 
 /**
  * Macro to create a method id, unique per filter.
@@ -639,13 +626,13 @@ the method index (_cnt_) and the argument size */
 #define MS_FILTER_EVENT_NO_ARG(_id_,_count_)\
 	MS_FILTER_METHOD_ID(_id_,_count_,0)
 
-	
+
 #define MS_FILTER_BASE_EVENT(_count_,_argtype_) \
 	MS_FILTER_EVENT(MS_FILTER_BASE_ID,_count_,_argtype_)
 
 #define MS_FILTER_BASE_EVENT_NO_ARG(_count_) \
 	MS_FILTER_EVENT_NO_ARG(MS_FILTER_BASE_ID,_count_)
-	
+
 /**
  *  some MSFilter base generic methods:
  **/
@@ -738,7 +725,7 @@ MS2_PUBLIC void ms_filter_postprocess(MSFilter *f);
 MS2_PUBLIC bool_t ms_filter_inputs_have_data(MSFilter *f);
 MS2_PUBLIC void ms_filter_notify(MSFilter *f, unsigned int id, void *arg);
 MS2_PUBLIC void ms_filter_notify_no_arg(MSFilter *f, unsigned int id);
-void ms_filter_clear_notify_callback(MSFilter *f);
+MS2_PUBLIC void ms_filter_clear_notify_callback(MSFilter *f);
 void ms_filter_clean_pending_events(MSFilter *f);
 #define ms_filter_lock(f)	ms_mutex_lock(&(f)->lock)
 #define ms_filter_unlock(f)	ms_mutex_unlock(&(f)->lock)

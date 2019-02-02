@@ -215,4 +215,3 @@ bool_t ortp_congestion_detector_record(OrtpCongestionDetector *cd, uint32_t pack
 void ortp_congestion_detector_destroy(OrtpCongestionDetector *obj){
 	ortp_free(obj);
 }
-

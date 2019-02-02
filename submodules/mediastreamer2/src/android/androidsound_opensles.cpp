@@ -131,11 +131,12 @@ struct OpenSLESContext {
 };
 
 struct OpenSLESOutputContext {
-	OpenSLESOutputContext() {
+	OpenSLESOutputContext(MSFilter *f) {
+		filter = f;
 		streamType = SL_ANDROID_STREAM_VOICE;
 		nbufs = 0;
 		outBufSize = DeviceFavoriteBufferSize;
-		ms_bufferizer_init(&buffer);
+		ms_flow_controlled_bufferizer_init(&buffer, f, DeviceFavoriteSampleRate, 1);
 		ms_mutex_init(&mutex,NULL);
 
 		currentBuffer = 0;
@@ -146,12 +147,24 @@ struct OpenSLESOutputContext {
 	~OpenSLESOutputContext() {
 		if (playBuffer[0] != NULL) free(playBuffer[0]);
 		if (playBuffer[1] != NULL) free(playBuffer[1]);
-		ms_bufferizer_uninit(&buffer);
+		ms_flow_controlled_bufferizer_uninit(&buffer);
 		ms_mutex_destroy(&mutex);
 	}
 
 	void setContext(OpenSLESContext *context) {
 		opensles_context = context;
+		ms_flow_controlled_bufferizer_set_samplerate(&buffer, opensles_context->samplerate);
+		ms_flow_controlled_bufferizer_set_nchannels(&buffer, opensles_context->nchannels);
+		ms_flow_controlled_bufferizer_set_max_size_ms(&buffer, flowControlThresholdMs);
+		ms_flow_controlled_bufferizer_set_flow_control_interval_ms(&buffer, flowControlIntervalMs);
+	}
+
+	void updateStreamTypeFromMsSndCard() {
+		MSSndCardStreamType type = ms_snd_card_get_stream_type(soundCard);
+		streamType = SL_ANDROID_STREAM_VOICE;
+		if (type == MS_SND_CARD_STREAM_RING) {
+			streamType = SL_ANDROID_STREAM_RING;
+		}
 	}
 
 	OpenSLESContext *opensles_context;
@@ -163,11 +176,11 @@ struct OpenSLESOutputContext {
 	SLAndroidConfigurationItf playerConfig;
 	SLint32 streamType;
 
-	MSBufferizer buffer;
+	MSSndCard *soundCard;
+	MSFilter *filter;
+	MSFlowControlledBufferizer buffer;
 	int nbufs;
 	ms_mutex_t mutex;
-	uint64_t flowControlStart;
-	int minBufferFilling;
 
 	uint8_t *playBuffer[2];
 	int outBufSize;
@@ -258,10 +271,9 @@ static void android_snd_card_detect(MSSndCardManager *m) {
 		ms_message("libOpenSLES correctly loaded, creating OpenSLES MS soundcard");
 		devices = ms_factory_get_devices_info(m->factory);
 		d = ms_devices_info_get_sound_device_description(devices);
-		if (d->flags & DEVICE_HAS_CRAPPY_OPENSLES)
-            return;
-        MSSndCard *card = android_snd_card_new(m);
-        ms_snd_card_manager_add_card(m, card);
+		if (d->flags & DEVICE_HAS_CRAPPY_OPENSLES) return;
+		MSSndCard *card = android_snd_card_new(m);
+		ms_snd_card_manager_add_card(m, card);
 	} else {
 		ms_warning("Failed to dlopen libOpenSLES, OpenSLES MS soundcard unavailable");
 	}
@@ -398,14 +410,6 @@ static SLresult opensles_recorder_init(OpenSLESInputContext *ictx) {
 	return result;
 }
 
-static void compute_timespec(OpenSLESInputContext *ictx) {
-	uint64_t ns = ((1000 * ictx->read_samples) / (uint64_t) ictx->opensles_context->samplerate) * 1000000;
-	MSTimeSpec ts;
-	ts.tv_nsec = ns % 1000000000;
-	ts.tv_sec = ns / 1000000000;
-	ictx->mAvSkew = ms_ticker_synchronizer_set_external_time(ictx->mTickerSynchronizer, &ts);
-}
-
 
 /*
  * This is a callback function called by AudioRecord's thread. This thread is not created by ortp/ms2 and is not able to attach to a JVM without crashing
@@ -420,17 +424,17 @@ static void opensles_recorder_callback(SLAndroidSimpleBufferQueueItf bq, void *c
 	if (ictx->mTickerSynchronizer == NULL) {
 		MSFilter *obj = ictx->mFilter;
 		/*
-		 * ABSOLUTE HORRIBLE HACK. We temporarily disable logs to prevent ms_ticker_set_time_func() to output a debug log.
+		 * ABSOLUTE HORRIBLE HACK. We temporarily disable logs to prevent ms_ticker_set_synchronizer() to output a debug log.
 		 * This is horrible because this also suspends logs for all concurrent threads during these two lines of code.
 		 * Possible way to do better:
 		 *  1) understand why AudioRecord thread doesn't detach.
 		 *  2) disable logs just for this thread (using a TLS)
 		 */
-		int loglevel=ortp_get_log_level_mask(ORTP_LOG_DOMAIN);
-		ortp_set_log_level_mask(ORTP_LOG_DOMAIN, ORTP_ERROR|ORTP_FATAL);
+		int loglevel=bctbx_get_log_level_mask(BCTBX_LOG_DOMAIN);
+		bctbx_set_log_level_mask(BCTBX_LOG_DOMAIN, BCTBX_LOG_ERROR|BCTBX_LOG_FATAL);
 		ictx->mTickerSynchronizer = ms_ticker_synchronizer_new();
-		ms_ticker_set_time_func(obj->ticker,(uint64_t (*)(void*))ms_ticker_synchronizer_get_corrected_time, ictx->mTickerSynchronizer);
-		ortp_set_log_level_mask(ORTP_LOG_DOMAIN, loglevel);
+		ms_ticker_set_synchronizer(obj->ticker, ictx->mTickerSynchronizer);
+		bctbx_set_log_level_mask(BCTBX_LOG_DOMAIN, loglevel);
 	}
 	ictx->read_samples += ictx->inBufSize / sizeof(int16_t);
 
@@ -439,7 +443,7 @@ static void opensles_recorder_callback(SLAndroidSimpleBufferQueueItf bq, void *c
 	m->b_wptr += ictx->inBufSize;
 
 	ms_mutex_lock(&ictx->mutex);
-	compute_timespec(ictx);
+	ictx->mAvSkew = ms_ticker_synchronizer_update(ictx->mTickerSynchronizer, ictx->read_samples, (unsigned int)ictx->opensles_context->samplerate);
 	putq(&ictx->q, m);
 	ms_mutex_unlock(&ictx->mutex);
 
@@ -580,7 +584,7 @@ static void android_snd_read_postprocess(MSFilter *obj) {
 		ictx->recorderBufferQueue = NULL;
 	}
 
-	ms_ticker_set_time_func(obj->ticker, NULL, NULL);
+	ms_ticker_set_synchronizer(obj->ticker, NULL);
 	ms_mutex_lock(&ictx->mutex);
 	ms_ticker_synchronizer_destroy(ictx->mTickerSynchronizer);
 	ictx->mTickerSynchronizer = NULL;
@@ -743,6 +747,7 @@ static SLresult opensles_sink_init(OpenSLESOutputContext *octx) {
 		return result;
 	}
 
+	octx->updateStreamTypeFromMsSndCard();
 	result = (*octx->playerConfig)->SetConfiguration(octx->playerConfig, SL_ANDROID_KEY_STREAM_TYPE, &octx->streamType, sizeof(SLint32));
 	if (result != SL_RESULT_SUCCESS) {
 		ms_error("OpenSLES Error %u while setting stream type configuration", result);
@@ -783,28 +788,13 @@ static void opensles_player_callback(SLAndroidSimpleBufferQueueItf bq, void* con
 
 	ms_mutex_lock(&octx->mutex);
 	int ask = octx->outBufSize;
-	int avail = ms_bufferizer_get_avail(&octx->buffer);
+	int avail = ms_flow_controlled_bufferizer_get_avail(&octx->buffer);
 	int bytes = MIN(ask, avail);
 
-	if ((octx->nbufs == 0) && (avail > (ask * 2))) {
-		/*ms_warning("OpenSLES skipping %i bytes", avail - (ask * 2) );*/
-		ms_bufferizer_skip_bytes(&octx->buffer, avail - (ask * 2));
-	}
-
-	if (avail != 0) {
-		if (octx->minBufferFilling == -1) {
-			octx->minBufferFilling = avail;
-		} else if (avail < octx->minBufferFilling) {
-			octx->minBufferFilling = avail;
-		}
-	}
-
 	if (bytes > 0) {
-		bytes = ms_bufferizer_read(&octx->buffer, octx->playBuffer[octx->currentBuffer], bytes);
+		bytes = ms_flow_controlled_bufferizer_read(&octx->buffer, octx->playBuffer[octx->currentBuffer], bytes);
 	} else {
-		/* we have an underrun (no more samples to deliver to the callback). We need to reset minBufferFilling*/
-		octx->minBufferFilling = -1;
-		/*provide soundcard with a silence buffer*/
+		/* We have an underrun (no more samples to deliver to the callback). We need to provide soundcard with a silence buffer */
 		bytes = ask;
 		memset(octx->playBuffer[octx->currentBuffer], 0, bytes);
 	}
@@ -858,20 +848,16 @@ static SLresult opensles_player_callback_init(OpenSLESOutputContext *octx) {
         return result;
 }
 
-static OpenSLESOutputContext* opensles_output_context_init() {
-	OpenSLESOutputContext* octx = new OpenSLESOutputContext();
-	return octx;
-}
-
 static MSFilter *android_snd_card_create_writer(MSSndCard *card) {
 	MSFilter *f = ms_android_snd_write_new(ms_snd_card_get_factory(card));
 	OpenSLESOutputContext *octx = static_cast<OpenSLESOutputContext*>(f->data);
+	octx->soundCard = card;
 	octx->setContext((OpenSLESContext*)card->data);
 	return f;
 }
 
 static void android_snd_write_init(MSFilter *obj){
-	OpenSLESOutputContext *octx = opensles_output_context_init();
+	OpenSLESOutputContext *octx = new OpenSLESOutputContext(obj);
 	obj->data = octx;
 }
 
@@ -905,6 +891,7 @@ static int android_snd_write_set_nchannels(MSFilter *obj, void *data) {
 	int *n = (int*)data;
 	OpenSLESOutputContext *octx = (OpenSLESOutputContext*)obj->data;
 	octx->opensles_context->nchannels = *n;
+	ms_flow_controlled_bufferizer_set_nchannels(&octx->buffer, octx->opensles_context->nchannels);
 	return 0;
 }
 
@@ -939,33 +926,13 @@ static void android_snd_write_preprocess(MSFilter *obj) {
 		return;
 	}
 
-	octx->flowControlStart = obj->ticker->time;
-	octx->minBufferFilling = -1;
 	octx->nbufs = 0;
-}
-
-static int bytes_to_ms(OpenSLESOutputContext *octx, int bytes){
-	return bytes * 1000 / (2 * octx->opensles_context->nchannels * octx->opensles_context->samplerate);
 }
 
 static void android_snd_write_process(MSFilter *obj) {
 	OpenSLESOutputContext *octx = (OpenSLESOutputContext*)obj->data;
-
 	ms_mutex_lock(&octx->mutex);
-	ms_bufferizer_put_from_queue(&octx->buffer, obj->inputs[0]);
-
-	if (((uint32_t)(obj->ticker->time - octx->flowControlStart)) >= flowControlIntervalMs) {
-		int threshold = (flowControlThresholdMs * octx->opensles_context->nchannels * 2 * octx->opensles_context->samplerate) / 1000;
-		//ms_message("OpenSLES Time to flow control: minBufferFilling=%i, threshold=%i", octx->minBufferFilling, threshold);
-		if (octx->minBufferFilling > threshold) {
-			int drop = octx->minBufferFilling - (threshold/4); //keep a bit in order not to risk an underrun in the next period.
-			ms_warning("OpenSLES Too many samples waiting in sound writer (minBufferFilling=%i ms, threshold=%i ms), dropping %i ms",
-					   bytes_to_ms(octx, octx->minBufferFilling), bytes_to_ms(octx, threshold), bytes_to_ms(octx, drop));
-			ms_bufferizer_skip_bytes(&octx->buffer, drop);
-		}
-		octx->flowControlStart = obj->ticker->time;
-		octx->minBufferFilling = -1;
-	}
+	ms_flow_controlled_bufferizer_put_from_queue(&octx->buffer, obj->inputs[0]);
 	ms_mutex_unlock(&octx->mutex);
 }
 
@@ -994,6 +961,10 @@ static void android_snd_write_postprocess(MSFilter *obj) {
 		(*octx->outputMixObject)->Destroy(octx->outputMixObject);
 		octx->outputMixObject = NULL;
 	}
+	free(octx->playBuffer[0]);
+	octx->playBuffer[0]=NULL;
+	free(octx->playBuffer[1]);
+	octx->playBuffer[1]=NULL;
 }
 
 static MSFilterMethod android_snd_write_methods[] = {

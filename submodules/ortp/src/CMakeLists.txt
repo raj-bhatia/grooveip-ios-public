@@ -59,9 +59,14 @@ set(ORTP_SOURCE_FILES_C
 	sessionset.c
 	str_utils.c
 	telephonyevents.c
+	videobandwidthestimator.c
 	utils.c
 )
 set(ORTP_SOURCE_FILES_CXX )
+
+add_definitions(
+	-DBCTBX_LOG_DOMAIN="ortp"
+)
 
 if(WIN32)
 	list(APPEND ORTP_SOURCE_FILES_C dll_entry.c)

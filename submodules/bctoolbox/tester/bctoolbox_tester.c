@@ -46,6 +46,7 @@ void bctoolbox_tester_init(void(*ftester_printf)(int level, const char *fmt, va_
 	bc_tester_init(log_handler,BCTBX_LOG_ERROR, 0,NULL);
 	bc_tester_add_suite(&containers_test_suite);
 	bc_tester_add_suite(&utils_test_suite);
+	bc_tester_add_suite(&crypto_test_suite);
 	bc_tester_add_suite(&parser_test_suite);
 }
 
@@ -63,7 +64,7 @@ int bctoolbox_tester_set_log_file(const char *filename) {
 	if (log_file) {
 		fclose(log_file);
 	}
-	log_file = fopen(filename, "w");
+	log_file = fopen(filename, "a");
 	if (!log_file) {
 		bctbx_error("Cannot open file [%s] for writing logs because [%s]", filename, strerror(errno));
 		return -1;

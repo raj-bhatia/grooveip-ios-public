@@ -67,6 +67,7 @@ static SoundDeviceDescription devices[]={
 	{	"motorola",				"XT907",				"",				0,	500 },
 	{	"motorola",				"DROIX X2",				"",				0,	320 },
 	{	"motorola",				"MotoG3",				"msm8916",		DEVICE_HAS_BUILTIN_AEC_CRAPPY,	100 }, /*The MotoG3 audio capture hangs for several seconds when switching to speaker mode*/
+	{	"motorola",				"Moto G (4)",				"msm8952",			0, 0, 44100 }, /*the soundcard doesn't work well at 48khz, it apparently output 44100 ! */
 	{	"motorola",				"Nexus 6",				"msm8084",		DEVICE_HAS_BUILTIN_OPENSLES_AEC, 0}, /* Nexus 6*/
 	{	"samsung",				"GT-S5360",				"bcm21553",		0,	250 }, /*<Galaxy Y*/
 	{	"samsung",				"GT-S5360L",			"",				0,	250 }, /*<Galaxy Y*/
@@ -171,6 +172,7 @@ static SoundDeviceDescription devices[]={
 	{	"LENOVO",				"Lenovo S60-a",			"msm8916",		0,	0 ,	44100},
 	{	"LENOVO",				"Lenovo A6000",			"",				DEVICE_HAS_UNSTANDARD_LIBMEDIA, 0},
 	{	"LENOVO",				"Lenovo A616",			"",				DEVICE_HAS_UNSTANDARD_LIBMEDIA, 0},
+	{	"LENOVO",				"Lenovo YT3-850F",		"msm8909",			DEVICE_HAS_BUILTIN_OPENSLES_AEC, 0},
 
 	{	"Enspert",				"IGGY",					""		,		0,	320 ,0}, /*Wiko iggy*/
 	{	"Yota Devices Limited", "YD201",				"msm8974",		DEVICE_HAS_BUILTIN_AEC | DEVICE_HAS_BUILTIN_OPENSLES_AEC, 0, 48000 }, /* Yotaphone 2 */
@@ -197,7 +199,8 @@ static SoundDeviceDescription devices[]={
 
 	{	"WIKO", 				"HIGHWAY 4G",			"tegra",		DEVICE_HAS_UNSTANDARD_LIBMEDIA, 0 },
 	{	"Symphony",				"HIGHWAY 4G",			"",				DEVICE_HAS_UNSTANDARD_LIBMEDIA, 0 },
-
+	{	"rockchip",				"rk3288_box",			"rk3288",	DEVICE_USE_ANDROID_CAMCORDER, 0, 16000},
+	{	"rockchip",				"X9-LX",				"rk3288",		DEVICE_USE_ANDROID_CAMCORDER, 0, 16000},
 	{	NULL, 					NULL,					NULL,			0, 	0,	0}
 };
 

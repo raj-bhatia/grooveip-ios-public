@@ -57,11 +57,8 @@ if(ANDROID)
 	list(APPEND BASE_SOURCE_FILES_C utils/msjava.c)
 endif()
 
-find_package(Git)
-add_custom_target(ms2-git-version
-	COMMAND ${CMAKE_COMMAND} -DGIT_EXECUTABLE=${GIT_EXECUTABLE} -DMEDIASTREAMER_VERSION=${MEDIASTREAMER_VERSION} -DWORK_DIR=${CMAKE_CURRENT_SOURCE_DIR} -DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/gitversion.cmake
-	BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/gitversion.h"
-)
+bc_git_version(ms2 ${PROJECT_VERSION})
+
 add_custom_target(ms2-basedescs-header
 	COMMAND ${CMAKE_COMMAND} -DAWK_PROGRAM=${AWK_PROGRAM} -DAWK_SCRIPTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../"
 		-DINPUT_DIR=${CMAKE_CURRENT_SOURCE_DIR} -DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}
@@ -74,6 +71,7 @@ add_definitions(
 	-DMS2_EXPORTS
 	-DMS2_INTERNAL
 	-DMS2_FILTERS
+	-DBCTBX_LOG_DOMAIN="mediastreamer"
 )
 
 set(BASE_LIBS
@@ -102,6 +100,7 @@ endif()
 if(ENABLE_SHARED)
 	add_library(mediastreamer_base SHARED ${MEDIASTREAMER2_HEADER_FILES} ${BASE_SOURCE_FILES_C})
 	set_target_properties(mediastreamer_base PROPERTIES LINKER_LANGUAGE C)
+	#TODO: replace by if(APPLE) when we want to make apple framework on linphone-desktop too
 	if(IOS)
 		if(IOS)
 			set(MIN_OS ${LINPHONE_IOS_DEPLOYMENT_TARGET})
@@ -113,8 +112,7 @@ if(ENABLE_SHARED)
 			FRAMEWORK TRUE
 			MACOSX_FRAMEWORK_IDENTIFIER org.linphone.mediastreamerbase
   			MACOSX_FRAMEWORK_INFO_PLIST Info_base.plist.in
-			PUBLIC_HEADER "${MEDIASTREAMER2_HEADER_FILES}"
-		) 
+		)
 	endif()
 	if(NOT ANDROID)
 		# Do not version shared library on Android
@@ -176,8 +174,6 @@ set(VOIP_SOURCE_FILES_C
 	utils/g722.h
 	utils/g722_decode.c
 	utils/g722_encode.c
-	utils/h264utils.h
-	utils/h264utils.c
 	utils/kiss_fft.c
 	utils/kiss_fft.h
 	utils/kiss_fftr.c
@@ -185,6 +181,7 @@ set(VOIP_SOURCE_FILES_C
 	utils/pcap_sender.c
 	utils/pcap_sender.h
 	utils/stream_regulator.c
+	utils/srtp_prefix.h
 	voip/audioconference.c
 	voip/audiostream.c
 	voip/bandwidthcontroller.c
@@ -258,13 +255,6 @@ endif()
 if(IOS)
 	list(APPEND VOIP_SOURCE_FILES_OBJC audiofilters/msiounit.m)
 endif()
-if(WIN32)
-	list(APPEND VOIP_SOURCE_FILES_CXX
-		audiofilters/mswasapi.cpp
-		audiofilters/mswasapi_reader.cpp
-		audiofilters/mswasapi_writer.cpp
-	)
-endif()
 
 if(ENABLE_G726)
 	list(APPEND VOIP_SOURCE_FILES_C audiofilters/g726.c)
@@ -294,6 +284,8 @@ endif()
 if(ENABLE_VIDEO)
 	list(APPEND VOIP_SOURCE_FILES_C
 		utils/bits_rw.c
+		utils/h264utils.c
+		utils/h264utils.h
 		videofilters/extdisplay.c
 		videofilters/mire.c
 		videofilters/nowebcam.c
@@ -301,15 +293,15 @@ if(ENABLE_VIDEO)
 		videofilters/sizeconv.c
 		voip/layouts.c
 		voip/layouts.h
-		voip/msvideo.c
 		voip/msvideo_neon.c
 		voip/msvideo_neon.h
+		voip/msvideo.c
 		voip/nowebcam.h
 		voip/rfc2429.h
 		voip/rfc3984.c
+		voip/video_preset_high_fps.c
 		voip/videostarter.c
 		voip/videostream.c
-		voip/video_preset_high_fps.c
 	)
 	if(FFMPEG_FOUND AND NOT TURBOJPEG_FOUND)
 		list(APPEND VOIP_SOURCE_FILES_C
@@ -434,6 +426,9 @@ if(ENABLE_VIDEO)
 			videofilters/glxvideo.c
 		)
 	endif()
+	if(NOT APPLE AND NOT ANDROID AND OPENGL_FOUND OR GLX_FOUND)
+		find_package(Glew REQUIRED)
+	endif()
 	if(SDL_FOUND)
 		list(APPEND VOIP_SOURCE_FILES_C videofilters/videoout.c)
 	endif()
@@ -462,7 +457,7 @@ if(ENABLE_VIDEO)
 		list(APPEND VOIP_SOURCE_FILES_C videofilters/x11video.c)
 	endif()
 endif()
-if(MATROSKA2_FOUND)
+if(BCMATROSKA2_FOUND)
 	list(APPEND VOIP_SOURCE_FILES_C
 		videofilters/mkv.c
 		utils/mkv_reader.c
@@ -622,14 +617,17 @@ endif()
 if(GLX_FOUND)
 	list(APPEND VOIP_LIBS ${GLX_LIBRARIES})
 endif()
+if(GLEW_FOUND)
+	list(APPEND VOIP_LIBS ${GLEW_LIBRARIES})
+endif()
 if(THEORA_FOUND)
 	list(APPEND VOIP_LIBS ${THEORA_LIBRARIES})
 endif()
 if(VPX_FOUND)
 	list(APPEND VOIP_LIBS ${VPX_LIBRARIES})
 endif()
-if(MATROSKA2_FOUND)
-	list(APPEND VOIP_LIBS ${MATROSKA2_LIBRARIES})
+if(BCMATROSKA2_FOUND)
+	list(APPEND VOIP_LIBS ${BCMATROSKA2_LIBRARIES})
 endif()
 if (SCREEN_FOUND)
 	list(APPEND VOIP_LIBS ${SCREEN_LIBRARIES})
@@ -673,6 +671,7 @@ if(ENABLE_SHARED)
 		set_target_properties(mediastreamer_voip PROPERTIES LINK_FLAGS "${LINK_FLAGS_STR}")
 	endif()
 	add_dependencies(mediastreamer_voip ${MS2_VOIP_DEPENDENCIES})
+	#TODO: replace by if(APPLE) when we want to make apple framework on linphone-desktop too
 	if(IOS)
 		if(IOS)
 			set(MIN_OS ${LINPHONE_IOS_DEPLOYMENT_TARGET})
@@ -684,10 +683,13 @@ if(ENABLE_SHARED)
 			FRAMEWORK TRUE
 			MACOSX_FRAMEWORK_IDENTIFIER org.linphone.mediastreamervoip
   			MACOSX_FRAMEWORK_INFO_PLIST Info_voip.plist.in
-			PUBLIC_HEADER "${MEDIASTREAMER2_HEADER_FILES}"
-		) 
+		)
 	endif()
-	if(NOT ANDROID)
+	if(ANDROID)
+    if(ENABLE_VPX)
+      set_target_properties(mediastreamer_voip PROPERTIES LINK_FLAGS "-Wl,--exclude-libs,libvpx.a")
+    endif()
+  else()
 		# Do not version shared library on Android
 		set_target_properties(mediastreamer_voip PROPERTIES SOVERSION ${MEDIASTREAMER_SO_VERSION})
 	endif()
@@ -711,6 +713,29 @@ if(ENABLE_SHARED)
 		FRAMEWORK DESTINATION Frameworks
 		PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
 	)
+endif()
+if (ENABLE_SHARED AND IOS) 
+	
+	#According to Apple documentation (https://developer.apple.com/library/content/documentation/MacOSX/Conceptual/BPFrameworks/Tasks/IncludingFrameworks.html)
+	#Framework header files must be included in application code using the #include directive using the followin patern: #include <Framework_name/Header_filename.h>. Consequece for medistreamer2 is that the framework must be named mediastreamer2. The final solution is to replace both mediastreamer_voip and mediastreamer_base by mediastreamer2. To preserve backward compatibility, both mediastreamer_voip and mediastreamer_base are kept for now (2018-05-06)
+	add_library(mediastreamer2 SHARED ${MEDIASTREAMER2_HEADER_FILES})
+        set_target_properties(mediastreamer2 PROPERTIES LINKER_LANGUAGE CXX)
+        add_dependencies(mediastreamer2 mediastreamer_voip)
+	target_link_libraries(mediastreamer2 INTERFACE "-framework mediastreamer_base" "-framework mediastreamer_voip" "-framework Foundation" "-framework Foundation" "-framework AVFoundation")
+	set_target_properties(mediastreamer2 PROPERTIES
+                FRAMEWORK TRUE
+                MACOSX_FRAMEWORK_IDENTIFIER org.linphone.mediastreamer
+                MACOSX_FRAMEWORK_INFO_PLIST Info.plist.in
+                PUBLIC_HEADER "${MEDIASTREAMER2_HEADER_FILES}"
+        )
+        install(TARGETS mediastreamer2 EXPORT ${EXPORT_TARGETS_NAME}Targets
+                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+                LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+                ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+                FRAMEWORK DESTINATION Frameworks
+                PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+        )
+
 endif()
 
 if(FFMPEG_FOUND AND NOT WIN32)

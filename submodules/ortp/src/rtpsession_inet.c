@@ -209,7 +209,7 @@ static ortp_socket_t create_and_bind(const char *addr, int *port, int *sock_fami
 			}
 		}
 
-#if defined(ORTP_TIMESTAMP)
+#ifdef SO_TIMESTAMP
 		optval=1;
 		err = setsockopt (sock, SOL_SOCKET, SO_TIMESTAMP,
 			(SOCKET_OPTION_VALUE)&optval, sizeof (optval));
@@ -224,12 +224,12 @@ static ortp_socket_t create_and_bind(const char *addr, int *port, int *sock_fami
 			default:
 			case AF_INET:
 #ifdef IP_RECVTTL
-				err = setsockopt(sock, IPPROTO_IP, IP_RECVTTL, &optval, sizeof(optval));
+				err = setsockopt(sock, IPPROTO_IP, IP_RECVTTL, (SOCKET_OPTION_VALUE)&optval, sizeof(optval));
 #endif
 				break;
 			case AF_INET6:
 #ifdef IPV6_RECVHOPLIMIT
-				err = setsockopt(sock, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &optval, sizeof(optval));
+				err = setsockopt(sock, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, (SOCKET_OPTION_VALUE)&optval, sizeof(optval));
 #endif
 				break;
 		}
@@ -240,7 +240,7 @@ static ortp_socket_t create_and_bind(const char *addr, int *port, int *sock_fami
 		*sock_family=res->ai_family;
 		err = bind(sock, res->ai_addr, (int)res->ai_addrlen);
 		if (err != 0){
-			ortp_error ("Fail to bind rtp socket to (addr=%s port=%i) : %s.", addr, *port, getSocketError());
+			ortp_error ("Fail to bind rtp/rtcp socket to (addr=%s port=%i) : %s.", addr, *port, getSocketError());
 			close_socket(sock);
 			sock=-1;
 			continue;
@@ -348,6 +348,10 @@ rtp_session_set_local_addr (RtpSession * session, const char * addr, int rtp_por
 {
 	ortp_socket_t sock;
 	int sockfamily;
+
+	// Stop async rtp recv thread before recreating the socket
+	rtp_session_reset_recvfrom(session);
+
 	if (session->rtp.gs.socket!=(ortp_socket_t)-1){
 		/* don't rebind, but close before*/
 		_rtp_session_release_sockets(session, FALSE);
@@ -1052,7 +1056,11 @@ int rtp_session_sendto(RtpSession *session, bool_t is_rtp, mblk_t *m, int flags,
 		ortp_mutex_unlock(&session->net_sim_ctx->mutex);
 	}else{
 		ortp_socket_t sockfd = rtp_session_get_socket(session, is_rtp);
-		ret=_ortp_sendto(sockfd, m, flags, destaddr, destlen);
+		if (sockfd != (ortp_socket_t)-1){
+			ret=_ortp_sendto(sockfd, m, flags, destaddr, destlen);
+		}else{
+			ret = -1;
+		}
 	}
 	return ret;
 }
@@ -1143,12 +1151,13 @@ void update_sent_bytes(OrtpStream *os, int nbytes) {
 	os->sent_bytes += nbytes + overhead;
 }
 
-static void update_recv_bytes(OrtpStream *os, int nbytes) {
+static void update_recv_bytes(OrtpStream *os, size_t nbytes, const struct timeval *recv_time) {
 	int overhead = ortp_stream_is_ipv6(os) ? IP6_UDP_OVERHEAD : IP_UDP_OVERHEAD;
 	if ((os->recv_bytes == 0) && (os->recv_bw_start.tv_sec == 0) && (os->recv_bw_start.tv_usec == 0)) {
 		ortp_gettimeofday(&os->recv_bw_start, NULL);
 	}
-	os->recv_bytes += nbytes + overhead;
+	os->recv_bytes += (unsigned int)(nbytes + overhead);
+	ortp_bw_estimator_packet_received(&os->recv_bw_estimator, nbytes + overhead, recv_time);
 }
 
 static void log_send_error(RtpSession *session, const char *type, mblk_t *m, struct sockaddr *destaddr, socklen_t destlen){
@@ -1335,8 +1344,8 @@ int rtp_session_rtp_recv_abstract(ortp_socket_t socket, mblk_t *msg, int flags, 
 		ret = bytes_received;
 #endif
 		for (cmsghdr = CMSG_FIRSTHDR(&msghdr); cmsghdr != NULL ; cmsghdr = CMSG_NXTHDR(&msghdr, cmsghdr)) {
-#if defined(ORTP_TIMESTAMP)
-			if (cmsghdr->cmsg_level == SOL_SOCKET && cmsghdr->cmsg_type == SO_TIMESTAMP) {
+#ifdef SO_TIMESTAMP
+			if (cmsghdr->cmsg_level == SOL_SOCKET && cmsghdr->cmsg_type == SCM_TIMESTAMP) {
 				memcpy(&msg->timestamp, (struct timeval *)CMSG_DATA(cmsghdr), sizeof(struct timeval));
 			}
 #endif
@@ -1381,6 +1390,7 @@ int rtp_session_rtp_recv_abstract(ortp_socket_t socket, mblk_t *msg, int flags, 
 			}
 #endif
 		}
+
 		/*store recv addr for use by modifiers*/
 		if (from && fromlen) {
 			memcpy(&msg->net_addr,from,*fromlen);
@@ -1511,7 +1521,7 @@ static int process_rtcp_packet( RtpSession *session, mblk_t *block, struct socka
 		return -1;
 	}
 
-	update_recv_bytes(&session->rtcp.gs, (int)(block->b_wptr - block->b_rptr));
+	update_recv_bytes(&session->rtcp.gs, (int)(block->b_wptr - block->b_rptr), &block->timestamp);
 
 	/* compound rtcp packet can be composed by more than one rtcp message */
 	do{
@@ -1599,7 +1609,7 @@ static void rtp_process_incoming_packet(RtpSession * session, mblk_t * mp, bool_
 			}
 		}
 		/* then parse the message and put on jitter buffer queue */
-		update_recv_bytes(&session->rtp.gs, (int)(mp->b_wptr - mp->b_rptr));
+		update_recv_bytes(&session->rtp.gs, (size_t)(mp->b_wptr - mp->b_rptr), &mp->timestamp);
 		rtp_session_rtp_parse(session, mp, user_ts, remaddr,addrlen);
 		/*for bandwidth measurements:*/
 	}else {
@@ -1635,56 +1645,126 @@ void rtp_session_process_incoming(RtpSession * session, mblk_t *mp, bool_t is_rt
 	}
 }
 
-int rtp_session_rtp_recv (RtpSession * session, uint32_t user_ts) {
+void* rtp_session_recvfrom_async(void* obj) {
+	RtpSession *session = (RtpSession*) obj;
 	int error;
 	struct sockaddr_storage remaddr;
 	socklen_t addrlen = sizeof (remaddr);
+	mblk_t *mp;
+#if	defined(_WIN32) || defined(_WIN32_WCE)
+	WSAPOLLFD fdarray = {0};
+	fdarray.fd = session->rtp.gs.socket;
+	fdarray.events = POLLRDNORM;
+	
+	if(!SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST)){
+		ortp_warning("Error rtp recv async thread for windows: SetThreadPriority() failed [%d]\n", (int)GetLastError());
+	}
+	
+	while(session->rtp.is_win_thread_running)
+	{
+		int ret = WSAPoll(&fdarray, 1, 10);
+		
+		if (ret == SOCKET_ERROR) {
+			ortp_warning("Error rtp recv async thread for windows: error while polling [%i]", WSAGetLastError());
+		} else if (ret > 0) {
+#endif
+			bool_t sock_connected=!!(session->flags & RTP_SOCKET_CONNECTED);
+
+			mp = msgb_allocator_alloc(&session->rtp.gs.allocator, session->recv_buf_size);
+
+			if (sock_connected){
+				error = rtp_session_recvfrom(session, TRUE, mp, 0, NULL, NULL);
+			}else if (rtp_session_using_transport(session, rtp)) {
+				error = (session->rtp.gs.tr->t_recvfrom)(session->rtp.gs.tr, mp, 0, (struct sockaddr *) &remaddr, &addrlen);
+			} else {
+				error = rtp_session_recvfrom(session, TRUE, mp, 0, (struct sockaddr *) &remaddr, &addrlen);
+			}
+			
+			if (error > 0) {
+				if (mp->timestamp.tv_sec == 0){
+					static int warn_once = 1; /*VERY BAD to use a static but there is no context in this function to hold this variable*/
+					if (warn_once){
+						ortp_warning("The transport layer doesn't implement SO_TIMESTAMP, will use gettimeofday() instead.");
+						warn_once = 0;
+					}
+					ortp_gettimeofday(&mp->timestamp, NULL);
+				}
+				
+				mp->b_wptr+=error;
+			
+#if	defined(_WIN32) || defined(_WIN32_WCE)
+				ortp_mutex_lock(&session->rtp.winrq_lock);
+#endif
+				putq(&session->rtp.winrq, mp);
+#if	defined(_WIN32) || defined(_WIN32_WCE)
+				ortp_mutex_unlock(&session->rtp.winrq_lock);
+#endif
+			} else {
+				int errnum;
+				if (error==-1 && !is_would_block_error((errnum=getSocketErrorCode())) )
+				{
+					if (session->on_network_error.count>0){
+						rtp_signal_table_emit3(&session->on_network_error,"Error receiving RTP packet",ORTP_INT_TO_POINTER(getSocketErrorCode()));
+					}else ortp_warning("Error receiving RTP packet: %s, err num  [%i],error [%i]",getSocketError(),errnum,error);
+	#if TARGET_OS_IPHONE
+					/*hack for iOS and non-working socket because of background mode*/
+					if (errnum==ENOTCONN){
+						/*re-create new sockets */
+						rtp_session_set_local_addr(session,session->rtp.gs.sockfamily==AF_INET ? "0.0.0.0" : "::0",session->rtp.gs.loc_port,session->rtcp.gs.loc_port);
+					}
+	#endif
+				}
+				freemsg(mp);
+			}
+#if	defined(_WIN32) || defined(_WIN32_WCE)
+		}
+	}
+#endif
+	
+	return NULL;
+}
+
+int rtp_session_rtp_recv (RtpSession * session, uint32_t user_ts) {
 	mblk_t *mp;
 
 	if ((session->rtp.gs.socket==(ortp_socket_t)-1) && !rtp_session_using_transport(session, rtp)) return -1;  /*session has no sockets for the moment*/
 
 	while (1)
 	{
-		bool_t sock_connected=!!(session->flags & RTP_SOCKET_CONNECTED);
-
-		mp = msgb_allocator_alloc(&session->rtp.gs.allocator, session->recv_buf_size);
-		mp->reserved1 = user_ts;
-
-		if (sock_connected){
-			error=rtp_session_recvfrom(session, TRUE, mp, 0, NULL, NULL);
-		}else if (rtp_session_using_transport(session, rtp)) {
-			error = (session->rtp.gs.tr->t_recvfrom)(session->rtp.gs.tr, mp, 0, (struct sockaddr *) &remaddr, &addrlen);
-		} else {
-			error = rtp_session_recvfrom(session, TRUE, mp, 0, (struct sockaddr *) &remaddr, &addrlen);
-		}
-		if (error > 0){
-			mp->b_wptr+=error;
-			rtp_session_process_incoming(session, mp, TRUE, user_ts, FALSE);
-		}
-		else
-		{
+#if	defined(_WIN32) || defined(_WIN32_WCE)
+		ortp_mutex_lock(&session->rtp.winthread_lock);
+		if (!session->rtp.is_win_thread_running) {
 			int errnum;
-			if (error==-1 && !is_would_block_error((errnum=getSocketErrorCode())) )
-			{
-				if (session->on_network_error.count>0){
-					rtp_signal_table_emit3(&session->on_network_error,"Error receiving RTP packet",ORTP_INT_TO_POINTER(getSocketErrorCode()));
-				}else ortp_warning("Error receiving RTP packet: %s, err num  [%i],error [%i]",getSocketError(),errnum,error);
-#if TARGET_OS_IPHONE
-				/*hack for iOS and non-working socket because of background mode*/
-				if (errnum==ENOTCONN){
-					/*re-create new sockets */
-					rtp_session_set_local_addr(session,session->rtp.gs.sockfamily==AF_INET ? "0.0.0.0" : "::0",session->rtp.gs.loc_port,session->rtcp.gs.loc_port);
-				}
-#endif
-			}else{
-				/*EWOULDBLOCK errors or transports returning 0 are ignored.*/
-				rtp_session_process_incoming(session, NULL, TRUE, user_ts, FALSE);
+			
+			session->rtp.is_win_thread_running = TRUE;
+			if ((errnum = ortp_thread_create(&session->rtp.win_t, NULL, rtp_session_recvfrom_async, (void*)session)) != 0) {
+				ortp_warning("Error creating rtp recv async thread for windows: error [%i]", errnum);
+				session->rtp.is_win_thread_running = FALSE;
+				return -1;
 			}
-			freemsg(mp);
+		}
+		ortp_mutex_unlock(&session->rtp.winthread_lock);
+#else
+		rtp_session_recvfrom_async((void*)session);
+#endif
+
+#if	defined(_WIN32) || defined(_WIN32_WCE)
+		ortp_mutex_lock(&session->rtp.winrq_lock);
+#endif
+		mp = getq(&session->rtp.winrq);
+#if	defined(_WIN32) || defined(_WIN32_WCE)
+		ortp_mutex_unlock(&session->rtp.winrq_lock);
+#endif
+		
+		if (mp != NULL) {
+			mp->reserved1 = user_ts;
+			rtp_session_process_incoming(session, mp, TRUE, user_ts, FALSE);
+		} else {
+			rtp_session_process_incoming(session, NULL, TRUE, user_ts, FALSE);
 			return -1;
 		}
 	}
-	return error;
+	return -1;
 }
 
 int rtp_session_rtcp_recv (RtpSession * session) {
@@ -1701,7 +1781,7 @@ int rtp_session_rtcp_recv (RtpSession * session) {
 	{
 		bool_t sock_connected=!!(session->flags & RTCP_SOCKET_CONNECTED);
 
-		mp = msgb_allocator_alloc(&session->rtp.gs.allocator, RTCP_MAX_RECV_BUFSIZE);
+		mp = msgb_allocator_alloc(&session->rtcp.gs.allocator, RTCP_MAX_RECV_BUFSIZE);
 		mp->reserved1 = session->rtp.rcv_last_app_ts;
 
 		if (sock_connected){

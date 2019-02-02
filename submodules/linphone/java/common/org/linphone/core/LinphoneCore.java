@@ -1101,6 +1101,14 @@ public interface LinphoneCore {
 	LinphoneFriendList[] getFriendLists();
 
 	/**
+	 * Get filtered list by filter
+	 * @param filter
+	 * @param sipOnly get only sip address
+	 * @return LinphoneAddress list
+	 */
+	LinphoneAddress[] findContactsByChar(String filter, boolean sipOnly);
+
+	/**
 	 * Set my presence status
 	 * @param minutes_away how long in away
 	 * @param alternative_contact sip uri used to redirect call in state LinphoneStatusMoved
@@ -2549,4 +2557,10 @@ public interface LinphoneCore {
 	 * @return a new LinphoneFriend with the given address link with this LinphoneCore
 	 */
 	public LinphoneFriend createFriendWithAddress(String address);
+
+	/**
+	  * Creates and stores a fake LinphoneCallLog
+	  * @return the LinphoneCallLog created and stored 
+	  */
+	public LinphoneCallLog createCallLog(LinphoneAddress from, LinphoneAddress to, CallDirection dir, int duration, long start, long connected, LinphoneCallLog.CallStatus status, boolean videoEnabled, float quality);
 }

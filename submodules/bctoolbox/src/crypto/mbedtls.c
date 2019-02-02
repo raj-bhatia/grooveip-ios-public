@@ -27,9 +27,8 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <mbedtls/ssl.h>
 #include <mbedtls/timing.h>
 #include <mbedtls/error.h>
-#include <mbedtls/net.h>
 #include <mbedtls/base64.h>
-
+#include <mbedtls/version.h>
 #include <mbedtls/pem.h>
 #include <mbedtls/x509.h>
 #include <mbedtls/entropy.h>
@@ -40,8 +39,15 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include <mbedtls/sha512.h>
 #include <mbedtls/gcm.h>
 
-#include <bctoolbox/crypto.h>
+#if MBEDTLS_VERSION_NUMBER >= 0x02040000 // v2.4.0
+#include <mbedtls/net_sockets.h>
+#else
+#include <mbedtls/net.h>
+#endif
+
+#include "bctoolbox/crypto.h"
 #include "bctoolbox/logging.h"
+
 
 
 static int bctbx_ssl_sendrecv_callback_return_remap(int32_t ret_code) {
@@ -144,10 +150,9 @@ char *bctbx_signing_key_get_pem(bctbx_signing_key_t *key) {
 
 int32_t bctbx_signing_key_parse(bctbx_signing_key_t *key, const char *buffer, size_t buffer_length, const unsigned char *password, size_t password_length) {
 	int err;
+	
 	err=mbedtls_pk_parse_key((mbedtls_pk_context *)key, (const unsigned char *)buffer, buffer_length, password, password_length);
-	if(err==0 && !mbedtls_pk_can_do((mbedtls_pk_context *)key, MBEDTLS_PK_RSA)) {
-		err=MBEDTLS_ERR_PK_TYPE_MISMATCH;
-	}
+	
 	if (err<0) {
 		char tmp[128];
 		mbedtls_strerror(err,tmp,sizeof(tmp));
@@ -159,10 +164,9 @@ int32_t bctbx_signing_key_parse(bctbx_signing_key_t *key, const char *buffer, si
 
 int32_t bctbx_signing_key_parse_file(bctbx_signing_key_t *key, const char *path, const char *password) {
 	int err;
+	
 	err=mbedtls_pk_parse_keyfile((mbedtls_pk_context *)key, path, password);
-	if(err==0 && !mbedtls_pk_can_do((mbedtls_pk_context *)key,MBEDTLS_PK_RSA)) {
-		err=MBEDTLS_ERR_PK_TYPE_MISMATCH;
-	}
+	
 	if (err<0) {
 		char tmp[128];
 		mbedtls_strerror(err,tmp,sizeof(tmp));
@@ -232,12 +236,38 @@ int32_t bctbx_x509_certificate_get_der(bctbx_x509_certificate_t *cert, unsigned 
 	return 0;
 }
 
-int32_t bctbx_x509_certificate_get_subject_dn(bctbx_x509_certificate_t *cert, char *dn, size_t dn_length) {
+int32_t bctbx_x509_certificate_get_subject_dn(const bctbx_x509_certificate_t *cert, char *dn, size_t dn_length) {
 	if (cert==NULL) {
 		return BCTBX_ERROR_INVALID_CERTIFICATE;
 	}
 
 	return mbedtls_x509_dn_gets(dn, dn_length, &(((mbedtls_x509_crt *)cert)->subject));
+}
+
+
+bctbx_list_t *bctbx_x509_certificate_get_subjects(const bctbx_x509_certificate_t *cert){
+	bctbx_list_t *ret = NULL;
+	char subject[1024]={0};
+	const mbedtls_x509_sequence *subjectAltNames = &((mbedtls_x509_crt *)cert)->subject_alt_names;
+	
+	for (; subjectAltNames != NULL; subjectAltNames = subjectAltNames->next){
+		const mbedtls_asn1_buf *buf = &subjectAltNames->buf;
+		if (buf->tag == ( MBEDTLS_ASN1_CONTEXT_SPECIFIC | 2 ) || buf->tag == ( MBEDTLS_ASN1_CONTEXT_SPECIFIC | 2 )){
+			ret = bctbx_list_append(ret, bctbx_strndup((char*)buf->p, buf->len));
+		}
+	}
+	
+	if (bctbx_x509_certificate_get_subject_dn(cert, subject, sizeof(subject)-1) > 0){
+		char *cn = strstr(subject, "CN=");
+		if (cn){
+			char *end;
+			cn += 3;
+			end = strchr(cn, ',');
+			if (end) *end = '\0';
+			ret = bctbx_list_append(ret, bctbx_strdup(cn));
+		}
+	}
+	return ret;
 }
 
 int32_t bctbx_x509_certificate_generate_selfsigned(const char *subject, bctbx_x509_certificate_t *certificate, bctbx_signing_key_t *pkey, char * pem, size_t pem_length) {
@@ -762,12 +792,12 @@ void bctbx_DestroyDHMContext(bctbx_DHMContext_t *context) {
 	if (context!= NULL) {
 		/* key and secret must be erased from memory and not just freed */
 		if (context->secret != NULL) {
-			memset(context->secret, 0, context->secretLength);
+			bctbx_clean(context->secret, context->secretLength);
 			free(context->secret);
 		}
 		free(context->self);
 		if (context->key != NULL) {
-			memset(context->key, 0, context->primeLength);
+			bctbx_clean(context->key, context->primeLength);
 			free(context->key);
 		}
 		free(context->peer);
@@ -943,6 +973,10 @@ const char *bctbx_ssl_get_ciphersuite(bctbx_ssl_context_t *ssl_ctx){
 	return mbedtls_ssl_get_ciphersuite(&(ssl_ctx->ssl_ctx));
 }
 
+int bctbx_ssl_get_ciphersuite_id(const char *ciphersuite){
+	return mbedtls_ssl_get_ciphersuite_id(ciphersuite);
+}
+
 const char *bctbx_ssl_get_version(bctbx_ssl_context_t *ssl_ctx){
 	return mbedtls_ssl_get_version(&(ssl_ctx->ssl_ctx));
 }
@@ -1049,6 +1083,10 @@ bctbx_ssl_config_t *bctbx_ssl_config_new(void) {
 	ssl_config->callback_cli_cert_data = NULL;
 
 	return ssl_config;
+}
+
+bctbx_type_implementation_t bctbx_ssl_get_implementation_type(void) {
+	return BCTBX_MBEDTLS;
 }
 
 int32_t bctbx_ssl_config_set_crypto_library_config(bctbx_ssl_config_t *ssl_config, void *internal_config) {
@@ -1171,6 +1209,24 @@ int32_t bctbx_ssl_config_set_transport (bctbx_ssl_config_t *ssl_config, int tran
 	mbedtls_ssl_conf_transport(ssl_config->ssl_config, mbedtls_transport);
 
 	return 0;
+}
+
+int32_t bctbx_ssl_config_set_ciphersuites(bctbx_ssl_config_t *ssl_config, const int *ciphersuites) {
+	if (ssl_config == NULL) {
+	 return BCTBX_ERROR_INVALID_SSL_CONFIG;
+	 }
+	/* remap input arguments */
+	if (ciphersuites == NULL) {
+		return BCTBX_ERROR_INVALID_INPUT_DATA;
+	}
+
+	mbedtls_ssl_conf_ciphersuites(ssl_config->ssl_config, ciphersuites);
+
+	return 0;
+}
+
+void *bctbx_ssl_config_get_private_config(bctbx_ssl_config_t *ssl_config) {
+	return (void *)ssl_config->ssl_config;
 }
 
 int32_t bctbx_ssl_config_set_authmode(bctbx_ssl_config_t *ssl_config, int authmode) {
@@ -1310,9 +1366,64 @@ int32_t bctbx_ssl_context_setup(bctbx_ssl_context_t *ssl_ctx, bctbx_ssl_config_t
 /*****************************************************************************/
 /***** Hashing                                                           *****/
 /*****************************************************************************/
+/*
+ * @brief HMAC-SHA512 wrapper
+ * @param[in] 	key		HMAC secret key
+ * @param[in] 	keyLength	HMAC key length
+ * @param[in]	input 		Input data buffer
+ * @param[in]   inputLength	Input data length
+ * @param[in]	hmacLength	Length of output required in bytes, HMAC output is truncated to the hmacLength left bytes. 64 bytes maximum
+ * @param[out]	output		Output data buffer.
+ *
+ */
+void bctbx_hmacSha512(const uint8_t *key,
+		size_t keyLength,
+		const uint8_t *input,
+		size_t inputLength,
+		uint8_t hmacLength,
+		uint8_t *output)
+{
+	uint8_t hmacOutput[64];
+	mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA512), key, keyLength, input, inputLength, hmacOutput);
+
+	/* check output length, can't be>64 */
+	if (hmacLength>64) {
+		memcpy(output, hmacOutput, 64);
+	} else {
+		memcpy(output, hmacOutput, hmacLength);
+	}
+}
 
 /*
- * HMAC-SHA-256 wrapper
+ * @brief HMAC-SHA384 wrapper
+ * @param[in] 	key		HMAC secret key
+ * @param[in] 	keyLength	HMAC key length
+ * @param[in]	input 		Input data buffer
+ * @param[in]   inputLength	Input data length
+ * @param[in]	hmacLength	Length of output required in bytes, HMAC output is truncated to the hmacLength left bytes. 48 bytes maximum
+ * @param[out]	output		Output data buffer.
+ *
+ */
+void bctbx_hmacSha384(const uint8_t *key,
+		size_t keyLength,
+		const uint8_t *input,
+		size_t inputLength,
+		uint8_t hmacLength,
+		uint8_t *output)
+{
+	uint8_t hmacOutput[48];
+	mbedtls_md_hmac(mbedtls_md_info_from_type(MBEDTLS_MD_SHA384), key, keyLength, input, inputLength, hmacOutput);
+
+	/* check output length, can't be>48 */
+	if (hmacLength>48) {
+		memcpy(output, hmacOutput, 48);
+	} else {
+		memcpy(output, hmacOutput, hmacLength);
+	}
+}
+
+/*
+ * brief HMAC-SHA256 wrapper
  * @param[in] 	key			HMAC secret key
  * @param[in] 	keyLength	HMAC key length
  * @param[in]	input 		Input data buffer
@@ -1340,10 +1451,58 @@ void bctbx_hmacSha256(const uint8_t *key,
 }
 
 /*
+ * @brief SHA512 wrapper
+ * @param[in]	input 		Input data buffer
+ * @param[in]   inputLength	Input data length in bytes
+ * @param[in]	hashLength	Length of output required in bytes, Output is truncated to the hashLength left bytes. 64 bytes maximum
+ * @param[out]	output		Output data buffer.
+ *
+ */
+void bctbx_sha512(const uint8_t *input,
+		size_t inputLength,
+		uint8_t hashLength,
+		uint8_t *output)
+{
+	uint8_t hashOutput[64];
+	mbedtls_sha512(input, inputLength, hashOutput, 0); /* last param to zero to select SHA512 and not SHA384 */
+
+	/* check output length, can't be>64 */
+	if (hashLength>64) {
+		memcpy(output, hashOutput, 64);
+	} else {
+		memcpy(output, hashOutput, hashLength);
+	}
+}
+
+/*
+ * @brief SHA384 wrapper
+ * @param[in]	input 		Input data buffer
+ * @param[in]   inputLength	Input data length in bytes
+ * @param[in]	hashLength	Length of output required in bytes, Output is truncated to the hashLength left bytes. 48 bytes maximum
+ * @param[out]	output		Output data buffer.
+ *
+ */
+void bctbx_sha384(const uint8_t *input,
+		size_t inputLength,
+		uint8_t hashLength,
+		uint8_t *output)
+{
+	uint8_t hashOutput[48];
+	mbedtls_sha512(input, inputLength, hashOutput, 1); /* last param to one to select SHA384 and not SHA512 */
+
+	/* check output length, can't be>48 */
+	if (hashLength>48) {
+		memcpy(output, hashOutput, 48);
+	} else {
+		memcpy(output, hashOutput, hashLength);
+	}
+}
+
+/*
  * @brief SHA256 wrapper
  * @param[in]	input 		Input data buffer
  * @param[in]   inputLength	Input data length in bytes
- * @param[in]	hmacLength	Length of output required in bytes, HMAC output is truncated to the hmacLength left bytes. 32 bytes maximum
+ * @param[in]	hashLength	Length of output required in bytes, Output is truncated to the hashLength left bytes. 32 bytes maximum
  * @param[out]	output		Output data buffer.
  *
  */

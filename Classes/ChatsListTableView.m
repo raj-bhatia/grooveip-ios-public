@@ -26,24 +26,18 @@
 #import "PhoneMainView.h"
 #import "Utils.h"
 
-@implementation ChatsListTableView {
-	bctbx_list_t *data;
-}
+@implementation ChatsListTableView
 
 #pragma mark - Lifecycle Functions
 
 - (instancetype)init {
 	self = super.init;
 	if (self) {
-		data = nil;
+		_data = nil;
+		_nbOfChatRoomToDelete = 0;
+		_waitView.hidden = TRUE;
 	}
 	return self;
-}
-
-- (void)dealloc {
-	if (data != nil) {
-		bctbx_list_free_with_data(data, chatTable_free_chatrooms);
-	}
 }
 
 #pragma mark - ViewController Functions
@@ -52,6 +46,7 @@
 	[super viewWillAppear:animated];
 	self.tableView.accessibilityIdentifier = @"Chat list";
 	[self loadData];
+	_chatRooms = NULL;
 }
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -60,6 +55,17 @@
 	// was not finished, leading to "[CALayer retain]: message sent to deallocated instance" error msg
 	if (IPAD && [self totalNumberOfItems] > 0) {
 		[PhoneMainView.instance changeCurrentView:ChatConversationView.compositeViewDescription];
+	}
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+	while (_chatRooms) {
+		LinphoneChatRoom *chatRoom = (LinphoneChatRoom *)_chatRooms->data;
+		if (!chatRoom)
+			continue;
+
+		linphone_chat_room_remove_callbacks(chatRoom, linphone_chat_room_get_current_callbacks(chatRoom));
+		_chatRooms = _chatRooms->next;
 	}
 }
 
@@ -74,17 +80,13 @@
 #pragma mark -
 
 static int sorted_history_comparison(LinphoneChatRoom *to_insert, LinphoneChatRoom *elem) {
-	LinphoneChatMessage *last_new_message = linphone_chat_room_get_user_data(to_insert);
-	LinphoneChatMessage *last_elem_message = linphone_chat_room_get_user_data(elem);
+	time_t new = linphone_chat_room_get_last_update_time(to_insert);
+	time_t old = linphone_chat_room_get_last_update_time(elem);
+	if (new < old)
+		return 1;
+	else if (new > old)
+		return -1;
 
-	if (last_new_message && last_elem_message) {
-		time_t new = linphone_chat_message_get_time(last_new_message);
-		time_t old = linphone_chat_message_get_time(last_elem_message);
-		if (new < old)
-			return 1;
-		else if (new > old)
-			return -1;
-	}
 	return 0;
 }
 
@@ -96,50 +98,33 @@ static int sorted_history_comparison(LinphoneChatRoom *to_insert, LinphoneChatRo
 	while (iter) {
 		// store last message in user data
 		LinphoneChatRoom *chat_room = iter->data;
-		bctbx_list_t *history = linphone_chat_room_get_history(iter->data, 1);
-		LinphoneChatMessage *last_msg = NULL;
-		if (history) {
-			last_msg = linphone_chat_message_ref(history->data);
-			bctbx_list_free(history);
-		}
-		linphone_chat_room_set_user_data(chat_room, last_msg);
-		sorted = bctbx_list_insert_sorted(sorted, linphone_chat_room_ref(chat_room),
-										  (bctbx_compare_func)sorted_history_comparison);
+		sorted = bctbx_list_insert_sorted(sorted, chat_room, (bctbx_compare_func)sorted_history_comparison);
 		iter = iter->next;
 	}
 	return sorted;
 }
 
-static void chatTable_free_chatrooms(void *data) {
-	LinphoneChatMessage *lastMsg = linphone_chat_room_get_user_data(data);
-	if (lastMsg) {
-		linphone_chat_message_unref(lastMsg);
-		linphone_chat_room_set_user_data(data, NULL);
-	}
-	linphone_chat_room_unref(data);
-}
-
 - (void)loadData {
-	if (data != NULL) {
-		bctbx_list_free_with_data(data, chatTable_free_chatrooms);
-	}
-	data = [self sortChatRooms];
+	if (_data) bctbx_list_free(_data);
+	_data = [self sortChatRooms];
 	[super loadData];
 
 	if (IPAD) {
-		int idx = bctbx_list_index(data, VIEW(ChatConversationView).chatRoom);
+		int idx = bctbx_list_index(_data, VIEW(ChatConversationView).chatRoom);
 		// if conversation view is using a chatroom that does not exist anymore, update it
 		if (idx != -1) {
 			NSIndexPath *indexPath = [NSIndexPath indexPathForRow:idx inSection:0];
 			[self.tableView selectRowAtIndexPath:indexPath animated:NO scrollPosition:UITableViewScrollPositionNone];
 		} else if (![self selectFirstRow]) {
-			[PhoneMainView.instance changeCurrentView:ChatConversationCreateView.compositeViewDescription];
+			ChatConversationCreateView *view = VIEW(ChatConversationCreateView);
+			view.tableController.notFirstTime = FALSE;
+			[PhoneMainView.instance changeCurrentView:view.compositeViewDescription];
 		}
 	}
 }
 
 - (void)markCellAsRead:(LinphoneChatRoom *)chatRoom {
-	int idx = bctbx_list_index(data, VIEW(ChatConversationView).chatRoom);
+	int idx = bctbx_list_index(_data, VIEW(ChatConversationView).chatRoom);
 	NSIndexPath *indexPath = [NSIndexPath indexPathForRow:idx inSection:0];
 	if (IPAD) {
 		UIChatCell *cell = (UIChatCell *)[self.tableView cellForRowAtIndexPath:indexPath];
@@ -154,17 +139,17 @@ static void chatTable_free_chatrooms(void *data) {
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-	return bctbx_list_size(data);
+	return bctbx_list_size(_data);
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
 	static NSString *kCellId = @"UIChatCell";
 	UIChatCell *cell = [tableView dequeueReusableCellWithIdentifier:kCellId];
-	if (cell == nil) {
+	if (cell == nil)
 		cell = [[UIChatCell alloc] initWithIdentifier:kCellId];
-	}
 
-	[cell setChatRoom:(LinphoneChatRoom *)bctbx_list_nth_data(data, (int)[indexPath row])];
+
+	[cell setChatRoom:(LinphoneChatRoom *)bctbx_list_nth_data(_data, (int)[indexPath row])];
 	[super accessoryForCell:cell atPath:indexPath];
 	return cell;
 }
@@ -173,31 +158,45 @@ static void chatTable_free_chatrooms(void *data) {
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
 	[super tableView:tableView didSelectRowAtIndexPath:indexPath];
-	if (![self isEditing]) {
-		LinphoneChatRoom *chatRoom = (LinphoneChatRoom *)bctbx_list_nth_data(data, (int)[indexPath row]);
-		ChatConversationView *view = VIEW(ChatConversationView);
-		[view setChatRoom:chatRoom];
-		// on iPad, force unread bubble to disappear by reloading the cell
-		if (IPAD) {
-			UIChatCell *cell = (UIChatCell *)[tableView cellForRowAtIndexPath:indexPath];
-			[cell updateUnreadBadge];
-		}
-		[PhoneMainView.instance changeCurrentView:view.compositeViewDescription];
+	if ([self isEditing])
+		return;
+
+	LinphoneChatRoom *chatRoom = (LinphoneChatRoom *)bctbx_list_nth_data(_data, (int)[indexPath row]);
+	[PhoneMainView.instance goToChatRoom:chatRoom];
+}
+
+void deletion_chat_room_state_changed(LinphoneChatRoom *cr, LinphoneChatRoomState newState) {
+	LinphoneChatRoomCbs *cbs = linphone_chat_room_get_current_callbacks(cr);
+	ChatsListTableView *view = (__bridge ChatsListTableView *)linphone_chat_room_cbs_get_user_data(cbs) ?: NULL;
+	if (!view)
+		return;
+	
+	if (newState == LinphoneChatRoomStateDeleted || newState == LinphoneChatRoomStateTerminationFailed) {
+		linphone_chat_room_remove_callbacks(cr, cbs);
+		view.chatRooms = bctbx_list_remove(view.chatRooms, cr);
+		view.nbOfChatRoomToDelete--;
+	}
+
+	if (view.nbOfChatRoomToDelete == 0) {
+		// will force a call to [self loadData]
+		[NSNotificationCenter.defaultCenter postNotificationName:kLinphoneMessageReceived object:view];
+		view.waitView.hidden = TRUE;
 	}
 }
 
-- (void)tableView:(UITableView *)tableView
-	commitEditingStyle:(UITableViewCellEditingStyle)editingStyle
-	 forRowAtIndexPath:(NSIndexPath *)indexPath {
-	if (editingStyle == UITableViewCellEditingStyleDelete) {
-		[tableView beginUpdates];
+- (void) deleteChatRooms {
+	_waitView.hidden = FALSE;
+	bctbx_list_t *chatRooms = bctbx_list_copy(_chatRooms);
+	while (chatRooms) {
+		LinphoneChatRoom *chatRoom = (LinphoneChatRoom *)chatRooms->data;
+		if (!chatRoom)
+			continue;
 
-		LinphoneChatRoom *chatRoom = (LinphoneChatRoom *)bctbx_list_nth_data(data, (int)[indexPath row]);
-		LinphoneChatMessage *last_msg = linphone_chat_room_get_user_data(chatRoom);
-		if (last_msg) {
-			linphone_chat_message_unref(last_msg);
-			linphone_chat_room_set_user_data(chatRoom, NULL);
-		}
+		_nbOfChatRoomToDelete++;
+		LinphoneChatRoomCbs *cbs = linphone_factory_create_chat_room_cbs(linphone_factory_get());
+		linphone_chat_room_cbs_set_state_changed(cbs, deletion_chat_room_state_changed);
+		linphone_chat_room_cbs_set_user_data(cbs, (__bridge void*)self);
+		linphone_chat_room_add_callbacks(chatRoom, cbs);
 
 		FileTransferDelegate *ftdToDelete = nil;
 		for (FileTransferDelegate *ftd in [LinphoneManager.instance fileTransferDelegates]) {
@@ -208,42 +207,44 @@ static void chatTable_free_chatrooms(void *data) {
 		}
 		[ftdToDelete cancel];
 
-		linphone_core_delete_chat_room(linphone_chat_room_get_core(chatRoom), chatRoom);
-		data = bctbx_list_remove(data, chatRoom);
+		linphone_core_delete_chat_room(LC, chatRoom);
+		chatRooms = chatRooms->next;
+	}
+}
 
-		// will force a call to [self loadData]
-		[NSNotificationCenter.defaultCenter postNotificationName:kLinphoneMessageReceived object:self];
-
-		[tableView deleteRowsAtIndexPaths:[NSArray arrayWithObject:indexPath]
-						 withRowAnimation:UITableViewRowAnimationFade];
-		[tableView endUpdates];
+- (void)tableView:(UITableView *)tableView
+	commitEditingStyle:(UITableViewCellEditingStyle)editingStyle
+	 forRowAtIndexPath:(NSIndexPath *)indexPath {
+	if (editingStyle == UITableViewCellEditingStyleDelete) {
+		LinphoneChatRoom *chatRoom = (LinphoneChatRoom *)bctbx_list_nth_data(_data, (int)[indexPath row]);
+		NSString *msg = (LinphoneChatRoomCapabilitiesOneToOne & linphone_chat_room_get_capabilities(chatRoom))
+			? [NSString stringWithFormat:NSLocalizedString(@"Do you want to delete this conversation?", nil)]
+			: [NSString stringWithFormat:NSLocalizedString(@"Do you want to leave and delete this conversation?", nil)];
+		[UIConfirmationDialog ShowWithMessage:msg
+								cancelMessage:nil
+							   confirmMessage:nil
+								onCancelClick:^() {}
+						  onConfirmationClick:^() {
+							  _chatRooms = bctbx_list_new((void *)chatRoom);
+							  [self deleteChatRooms];
+						  }];
 	}
 }
 
 - (void)removeSelectionUsing:(void (^)(NSIndexPath *))remover {
-	[super removeSelectionUsing:^(NSIndexPath *indexPath) {
-	  LinphoneChatRoom *chatRoom = (LinphoneChatRoom *)bctbx_list_nth_data(data, (int)[indexPath row]);
-	  LinphoneChatMessage *last_msg = linphone_chat_room_get_user_data(chatRoom);
-	  if (last_msg) {
-		  linphone_chat_message_unref(last_msg);
-		  linphone_chat_room_set_user_data(chatRoom, NULL);
-	  }
-
-	  FileTransferDelegate *ftdToDelete = nil;
-	  for (FileTransferDelegate *ftd in [LinphoneManager.instance fileTransferDelegates]) {
-		  if (linphone_chat_message_get_chat_room(ftd.message) == chatRoom) {
-			  ftdToDelete = ftd;
-			  break;
-		  }
-	  }
-	  [ftdToDelete cancel];
-
-	  linphone_core_delete_chat_room(linphone_chat_room_get_core(chatRoom), chatRoom);
-	  data = bctbx_list_remove(data, chatRoom);
-
-	  // will force a call to [self loadData]
-	  [NSNotificationCenter.defaultCenter postNotificationName:kLinphoneMessageReceived object:self];
+	_chatRooms = NULL;
+	// we must iterate through selected items in reverse order
+	[self.selectedItems sortUsingComparator:^(NSIndexPath *obj1, NSIndexPath *obj2) {
+		return [obj2 compare:obj1];
 	}];
+	NSArray *copy = [[NSArray alloc] initWithArray:self.selectedItems];
+	for (NSIndexPath *indexPath in copy) {
+		LinphoneChatRoom *chatRoom = (LinphoneChatRoom *)bctbx_list_nth_data(_data, (int)[indexPath row]);
+		_chatRooms = bctbx_list_append(_chatRooms, chatRoom);
+	}
+	[self deleteChatRooms];
+	[self.selectedItems removeAllObjects];
+	[self setEditing:NO animated:YES];
 }
 
 @end

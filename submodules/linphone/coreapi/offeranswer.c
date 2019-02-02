@@ -17,9 +17,12 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
+#include "c-wrapper/internal/c-sal.h"
 #include "sal/sal.h"
 #include "offeranswer.h"
 #include "private.h"
+
+#include "utils/payload-type-handler.h"
 
 static bool_t only_telephone_event(const bctbx_list_t *l){
 	for(;l!=NULL;l=l->next){
@@ -495,7 +498,7 @@ static void initiate_incoming(MSFactory *factory, const SalStreamDescription *lo
 
 	if (remote_offer->haveZrtpHash == 1) {
 		if (local_cap->zrtphash[0] != 0) { /* if ZRTP is available, set the zrtp hash even if it is not selected */
-			strncpy((char *)(result->zrtphash), (char *)(local_cap->zrtphash), sizeof(local_cap->zrtphash));
+			strncpy((char *)(result->zrtphash), (char *)(local_cap->zrtphash), sizeof(result->zrtphash));
 			result->haveZrtpHash =  1;
 		}
 	}

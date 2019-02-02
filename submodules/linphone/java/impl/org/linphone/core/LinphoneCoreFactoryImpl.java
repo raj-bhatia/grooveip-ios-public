@@ -43,7 +43,7 @@ public class LinphoneCoreFactoryImpl extends LinphoneCoreFactory {
 	}
 
 	static {
-		System.loadLibrary("gnustl_shared");
+		System.loadLibrary("c++_shared");
 		loadOptionalLibrary("ffmpeg-linphone");
 		System.loadLibrary("bctoolbox");
 		System.loadLibrary("ortp");
@@ -79,7 +79,7 @@ public class LinphoneCoreFactoryImpl extends LinphoneCoreFactory {
 	}
 
 	private boolean loadingDownloadedOpenH264(Context context) {
-		File file = new File(context.getFilesDir()+"/../lib/libmsopenh264.so");
+		File file = new File(context.getApplicationInfo().nativeLibraryDir+"/libmsopenh264.so");
 
 		if (!file.exists()) {
 			Log.i("LinphoneCoreFactoryImpl"," libmsopenh264 not found, we disable the download of Openh264");
@@ -107,9 +107,8 @@ public class LinphoneCoreFactoryImpl extends LinphoneCoreFactory {
 			MediastreamerAndroidContext.setContext(context);
 			File user = userConfig == null ? null : new File(userConfig);
 			File factory = factoryConfig == null ? null : new File(factoryConfig);
-			LinphoneCore lc = new LinphoneCoreImpl(listener, user, factory, userdata);
+			LinphoneCore lc = new LinphoneCoreImpl(listener, user, factory, userdata, context);
 			lc.enableDownloadOpenH264(openh264DownloadEnabled);
-			if (context != null) lc.setContext(context);
 			return lc;
 		} catch (IOException e) {
 			throw new LinphoneCoreException("Cannot create LinphoneCore",e);
@@ -123,9 +122,8 @@ public class LinphoneCoreFactoryImpl extends LinphoneCoreFactory {
 			boolean openh264DownloadEnabled = false;
 			if (context != null) openh264DownloadEnabled = loadingDownloadedOpenH264(fcontext);
 			MediastreamerAndroidContext.setContext(context);
-			LinphoneCore lc = new LinphoneCoreImpl(listener);
+			LinphoneCore lc = new LinphoneCoreImpl(listener, context);
 			lc.enableDownloadOpenH264(openh264DownloadEnabled);
-			if (context != null) lc.setContext(context);
 			return lc;
 		} catch (IOException e) {
 			throw new LinphoneCoreException("Cannot create LinphoneCore",e);

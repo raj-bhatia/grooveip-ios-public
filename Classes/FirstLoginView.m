@@ -28,6 +28,7 @@
 #import "LoginResponse.h"
 #import "CreateArn.h"
 #import "GenericResponse.h"
+#import "MyContact.h"
 
 @implementation FirstLoginView
 
@@ -328,13 +329,15 @@ static UICompositeViewDescription *compositeDescription = nil;
 			 linphone_proxy_config_get_snrblabs_token(config));
 		linphone_address_unref(addr);
 		
+		[LinphoneManager.instance initFastAddressbook];
+		
 		if (config) {
 			[[LinphoneManager instance] configurePushTokenForProxyConfig:config];
 			if (linphone_core_add_proxy_config(LC, config) != -1) {
 				linphone_core_set_default_proxy_config(LC, config);
 				// reload address book to prepend proxy config domain to contacts' phone number
 				// todo: STOP doing that!
-				[[LinphoneManager.instance fastAddressBook] reload];
+				[[LinphoneManager.instance fastAddressBook] fetchContactsInBackGroundThread];
 				dispatch_async(dispatch_get_main_queue(), ^{
 					[PhoneMainView.instance changeCurrentView:DialerView.compositeViewDescription];
 				});

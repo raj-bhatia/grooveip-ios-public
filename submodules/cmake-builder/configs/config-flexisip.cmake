@@ -21,25 +21,22 @@
 ############################################################################
 
 # Define default values for the flexisip builder options
-set(DEFAULT_VALUE_DISABLE_BC_ANTLR OFF)
-set(DEFAULT_VALUE_ENABLE_BC_ODBC OFF)
-set(DEFAULT_VALUE_ENABLE_BC_HIREDIS OFF)
-set(DEFAULT_VALUE_ENABLE_ODB OFF)
-set(DEFAULT_VALUE_ENABLE_ODBC OFF)
 set(DEFAULT_VALUE_ENABLE_PUSHNOTIFICATION ON)
 set(DEFAULT_VALUE_ENABLE_REDIS ON)
 set(DEFAULT_VALUE_ENABLE_UNIT_TESTS OFF)
 set(DEFAULT_VALUE_ENABLE_PRESENCE OFF)
+set(DEFAULT_VALUE_ENABLE_CONFERENCE OFF)
 set(DEFAULT_VALUE_ENABLE_SNMP ON)
 set(DEFAULT_VALUE_ENABLE_POLARSSL ON)
+set(DEFAULT_VALUE_ENABLE_PROTOBUF OFF)
 
+set(DEFAULT_VALUE_ENABLE_VCARD OFF)
 set(DEFAULT_VALUE_ENABLE_VIDEO OFF)
 
 set(DEFAULT_VALUE_CMAKE_LINKING_TYPE "-DENABLE_STATIC=NO")
 
 # ms2 default values
 set(DEFAULT_VALUE_ENABLE_SPEEX ON)
-
 
 # Global configuration
 set(LINPHONE_BUILDER_HOST "")
@@ -76,8 +73,22 @@ if(NOT CMAKE_INSTALL_RPATH)
 endif()
 message("cmake install rpath: ${CMAKE_INSTALL_RPATH}")
 
-# bctoolbox
-lcb_builder_cmake_options(bctoolbox "-DENABLE_TESTS_COMPONENT=NO")
-
 # Include builders
 include(builders/CMakeLists.txt)
+
+# bctoolbox
+lcb_builder_cmake_options(bctoolbox "-DENABLE_TESTS_COMPONENT=${ENABLE_UNIT_TESTS}")
+
+# linphone
+lcb_builder_cmake_options(linphone
+	"-DENABLE_CONSOLE_UI=NO"
+	"-DENABLE_DAEMON=NO"
+)
+if(ENABLE_CONFERENCE)
+	lcb_builder_cmake_options(linphone
+		"-DENABLE_CXX_WRAPPER=YES"
+		"-DENABLE_SOCI=YES"
+		"-DENABLE_UNIT_TESTS=${ENABLE_UNIT_TESTS}"
+	)
+endif()
+

@@ -35,7 +35,7 @@ static void guess_display_name(LinphoneAddress *from){
 	bool_t surname=0;
 	for(it=linphone_address_get_username(from);*it!='\0';++it){
 		if (begin){
-			*wptr=toupper(*it);
+			*wptr = (char)toupper(*it);
 			begin=FALSE;
 		}else if (*it=='.'){
 			if (surname) break;
@@ -87,18 +87,6 @@ static int sip_login_do_logout(SipSetupContext * ctx){
 }
 
 /* a simple SipSetup built-in plugin to allow specify the user/password for proxy config at runtime*/
-
-#ifndef _MSC_VER
-
-SipSetup linphone_sip_login={
-	.name="SipLogin",
-	.capabilities=SIP_SETUP_CAP_LOGIN,
-	.init_instance=sip_login_init_instance,
-	.login_account=sip_login_do_login,
-	.logout_account=sip_login_do_logout
-};
-
-#else
 SipSetup linphone_sip_login={
 	"SipLogin",
 	SIP_SETUP_CAP_LOGIN,
@@ -119,7 +107,3 @@ SipSetup linphone_sip_login={
 	NULL,
 	NULL
 };
-
-
-
-#endif

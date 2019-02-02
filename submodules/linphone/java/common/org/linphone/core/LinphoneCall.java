@@ -20,6 +20,8 @@ package org.linphone.core;
 
 import java.util.Vector;
 
+import org.linphone.mediastream.video.AndroidVideoWindowImpl;
+
 /**
  * Object representing a call. Calls are created using {@link LinphoneCore#invite(LinphoneAddress)} or passed to the application by listener {@link LinphoneCoreListener#callState}
  * 
@@ -29,8 +31,12 @@ public interface LinphoneCall {
 	/**
 	 * LinphoneCall listener
 	 */
-	interface LinphoneCallListener {
+	public interface LinphoneCallListener {
 		void onNextVideoFrameDecoded(LinphoneCall call);
+		/**
+		 * Invoked when a TMMBR RTCP packet is received.
+		 */
+		void tmmbrReceived(LinphoneCall call, int streamIndex, int bitrate);
 	}
 
 	/**
@@ -403,6 +409,13 @@ public interface LinphoneCall {
 	 * Set the callbacks associated with the LinphoneCall.
 	 */
 	void setListener(LinphoneCall.LinphoneCallListener listener);
+
+	/**
+	 * Set the native video window id where the video is to be displayed.
+	 * On Android, it must be of type {@link AndroidVideoWindowImpl}
+	 * @param w window of type {@link AndroidVideoWindowImpl}
+	 */
+	void setVideoWindow(Object w);
 
 	/**
 	 * Indicates if remote party requested automatic answering to be performed.

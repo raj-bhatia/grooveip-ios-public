@@ -24,6 +24,10 @@
 @interface TabBarView : TPMultiLayoutViewController {
 }
 
+#if 1	// Changed Linphone code - Keep track of SMS (Chat) tab
+@property (class) BOOL inSmsTab;
+#endif
+
 @property(nonatomic, strong) IBOutlet UIButton *historyButton;
 @property(nonatomic, strong) IBOutlet UIButton *contactsButton;
 @property(nonatomic, strong) IBOutlet UIButton *dialerButton;

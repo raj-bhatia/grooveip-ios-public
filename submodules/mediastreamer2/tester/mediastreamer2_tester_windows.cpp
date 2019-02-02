@@ -1,6 +1,8 @@
 ﻿#include <string>
 #include <collection.h>
 
+#include <bctoolbox/logging.h>
+
 #include "mediastreamer2_tester_windows.h"
 #include "mswinrtvid.h"
 
@@ -53,7 +55,7 @@ static void nativeOutputTraceHandler(int lev, const char *fmt, va_list args)
 	OutputDebugStringW(L"\n");
 }
 
-static void ms2NativeOutputTraceHandler(const char *domain, OrtpLogLevel lev, const char *fmt, va_list args)
+static void ms2NativeOutputTraceHandler(void *info, const char *domain, BctbxLogLevel lev, const char *fmt, va_list args)
 {
 	nativeOutputTraceHandler((int)lev, fmt, args);
 }
@@ -82,7 +84,7 @@ void NativeTester::initialize(StorageFolder^ writableDirectory, Platform::Boolea
 	}
 	else {
 		mediastreamer2_tester_init(NULL);
-		ortp_set_log_level_mask(NULL, (OrtpLogLevel)(ORTP_MESSAGE | ORTP_WARNING | ORTP_ERROR | ORTP_FATAL));
+		bctbx_set_log_level(NULL, BCTBX_LOG_MESSAGE);
 	}
 
 	char writable_dir[MAX_WRITABLE_DIR_SIZE] = { 0 };
@@ -109,16 +111,17 @@ bool NativeTester::run(Platform::String^ suiteName, Platform::String^ caseName, 
 	std::wstring wscasename = caseName->Data();
 	char csuitename[MAX_SUITE_NAME_SIZE] = { 0 };
 	char ccasename[MAX_SUITE_NAME_SIZE] = { 0 };
+	bctbx_log_handler_t *log_handler = bctbx_create_log_handler(ms2NativeOutputTraceHandler, NULL, NULL);
 	wcstombs(csuitename, wssuitename.c_str(), sizeof(csuitename));
 	wcstombs(ccasename, wscasename.c_str(), sizeof(ccasename));
 
 	if (verbose) {
-		ortp_set_log_level_mask(NULL, ORTP_MESSAGE | ORTP_WARNING | ORTP_ERROR | ORTP_FATAL);
+		bctbx_set_log_level(NULL, BCTBX_LOG_MESSAGE);
 	}
 	else {
-		ortp_set_log_level_mask(NULL, ORTP_ERROR | ORTP_FATAL);
+		bctbx_set_log_level(NULL, BCTBX_LOG_ERROR);
 	}
-	ortp_set_log_handler(ms2NativeOutputTraceHandler);
+	bctbx_add_log_handler(log_handler);
 	return bc_tester_run_tests(wssuitename == all ? 0 : csuitename, wscasename == all ? 0 : ccasename, NULL) != 0;
 }
 
@@ -307,8 +310,9 @@ void NativeTester::initMS2()
 {
 	if (_factory == nullptr) {
 		ortp_init();
-		ortp_set_log_level_mask(NULL, ORTP_MESSAGE | ORTP_WARNING | ORTP_ERROR | ORTP_FATAL);
-		ortp_set_log_handler(ms2NativeOutputTraceHandler);
+		bctbx_set_log_level(NULL, BCTBX_LOG_MESSAGE);
+		bctbx_log_handler_t *log_handler = bctbx_create_log_handler(ms2NativeOutputTraceHandler, NULL, NULL);
+		bctbx_add_log_handler(log_handler);
 		_factory = ms_factory_new_with_voip();
 	}
 }

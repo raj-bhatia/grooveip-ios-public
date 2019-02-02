@@ -51,6 +51,13 @@
 }
 
 #pragma mark -
+- (void)setEvent:(LinphoneEventLog *)event {
+	if (!event || !(linphone_event_log_get_type(event) == LinphoneEventLogTypeConferenceChatMessage))
+		return;
+
+	super.event = event;
+	[self setChatMessage:linphone_event_log_get_chat_message(event)];
+}
 
 - (void)setChatMessage:(LinphoneChatMessage *)amessage {
 	_imageGestureRecognizer.enabled = NO;
@@ -76,6 +83,17 @@
 	}
 
 	[super setChatMessage:amessage];
+}
+
+- (void) loadAsset:(ALAsset*) asset {
+	UIImage *image = [[UIImage alloc] initWithCGImage:[asset thumbnail]];
+	dispatch_async(dispatch_get_main_queue(), ^{
+		[_messageImageView setImage:image];
+		[_messageImageView setFullImageUrl:asset];
+		[_messageImageView stopLoading];
+		_messageImageView.hidden = NO;
+		_imageGestureRecognizer.enabled = YES;
+	});
 }
 
 - (void)update {
@@ -106,16 +124,27 @@
 					resultBlock:^(ALAsset *asset) {
 					  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, (unsigned long)NULL),
 									 ^(void) {
-									   if (achat == self.message) { // Avoid glitch and scrolling
-										   UIImage *image = [[UIImage alloc] initWithCGImage:[asset thumbnail]];
-										   dispatch_async(dispatch_get_main_queue(), ^{
-											 [_messageImageView setImage:image];
-											 [_messageImageView setFullImageUrl:asset];
-											 [_messageImageView stopLoading];
-											 _messageImageView.hidden = NO;
-											 _imageGestureRecognizer.enabled = YES;
-										   });
-									   }
+										 if (achat != self.message) // Avoid glitch and scrolling
+											 return;
+
+										 if (asset)
+											 [self loadAsset:asset];
+										 else {
+											 [LinphoneManager.instance.photoLibrary
+											  enumerateGroupsWithTypes:ALAssetsGroupAll
+											  				usingBlock:^(ALAssetsGroup *group, BOOL *stop) {
+																[group enumerateAssetsWithOptions:NSEnumerationReverse
+																					   usingBlock:^(ALAsset *result, NSUInteger index, BOOL *stop) {
+																						   if([result.defaultRepresentation.url isEqual:imageUrl]) {
+																							   [self loadAsset:result];
+																							   *stop = YES;
+																						   }
+																					   }];
+															}
+														  failureBlock:^(NSError *error) {
+															  LOGE(@"Error: Cannot load asset from photo stream - %@", [error localizedDescription]);
+														  }];
+										 }
 									 });
 					}
 					failureBlock:^(NSError *error) {
@@ -150,10 +179,22 @@
 }
 
 - (IBAction)onDownloadClick:(id)event {
+#if 1	// Changed Linphone code - MMS
+	BOOL outgoing = linphone_chat_message_is_outgoing(self.message);
+	NSString *type = [NSString stringWithUTF8String : linphone_chat_message_get_content_type(self.message)];
+	NSString *localImage = [LinphoneManager getMessageAppDataForKey:@"localimage" inMessage:self.message];
+	if (!outgoing && [type isEqualToString:@"application/octet-stream"] && !localImage) {
+		[_ftd cancel];
+		_ftd = [[FileTransferDelegate alloc] init];
+		[self connectToFileDelegate:_ftd];
+		[_ftd download:self.message announceCompletion:FALSE];
+	}
+#else
 	[_ftd cancel];
 	_ftd = [[FileTransferDelegate alloc] init];
 	[self connectToFileDelegate:_ftd];
 	[_ftd download:self.message];
+#endif
 	_cancelButton.hidden = NO;
 	_downloadButton.hidden = YES;
 }
@@ -172,7 +213,7 @@
 	} else if (_cancelButton.hidden == NO) {
 		[self onCancelClick:event];
 	} else {
-		[super onResendClick:event];
+		[super onResend];
 	}
 }
 
@@ -232,7 +273,7 @@
 		_fileTransferProgress.hidden = _cancelButton.hidden = (_fileTransferProgress.progress == 1.f);
 	} else {
 		ChatConversationView *view = VIEW(ChatConversationView);
-		[view.tableController updateChatEntry:self.message];
+		[view.tableController updateEventEntry:self.event];
 	}
 }
 - (void)onFileTransferRecvUpdate:(NSNotification *)notif {
@@ -243,7 +284,7 @@
 		_fileTransferProgress.hidden = _cancelButton.hidden = (_fileTransferProgress.progress == 1.f);
 	} else {
 		ChatConversationView *view = VIEW(ChatConversationView);
-		[view.tableController updateChatEntry:self.message];
+		[view.tableController updateEventEntry:self.event];
 	}
 }
 

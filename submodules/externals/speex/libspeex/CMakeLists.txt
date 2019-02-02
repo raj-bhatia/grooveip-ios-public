@@ -16,7 +16,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program; if not, write to the Free Software
-# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #
 ############################################################################
 
@@ -40,8 +40,6 @@ if(ENABLE_SPEEX_CODEC)
 		hexc_10_32_table.c
 		hexc_table.c
 		high_lsp_tables.c
-		kiss_fft.c
-		kiss_fftr.c
 		lpc.c
 		lsp.c
 		lsp_tables_nb.c
@@ -51,7 +49,6 @@ if(ENABLE_SPEEX_CODEC)
 		nb_celp.c
 		quant_lsp.c
 		sb_celp.c
-		smallft.c
 		speex.c
 		speex_callbacks.c
 		speex_header.c
@@ -59,9 +56,6 @@ if(ENABLE_SPEEX_CODEC)
 		vbr.c
 		vq.c
 		window.c
-		_kiss_fft_guts.h
-		kiss_fft.h
-		kiss_fftr.h
 	)
 
 	if(MSVC)
@@ -116,10 +110,6 @@ if(ENABLE_SPEEX_DSP)
 
 	if(MSVC)
 		list(APPEND LIBSPEEXDSP_SOURCE_FILES libspeexdsp.def)
-	endif()
-
-	if(ANDROID AND CMAKE_SYSTEM_PROCESSOR STREQUAL "armeabi-v7a")
-		set_source_files_properties(resample_neon.c PROPERTIES COMPILE_FLAGS "-mfpu=neon")
 	endif()
 
 	if(ENABLE_STATIC)

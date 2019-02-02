@@ -1,6 +1,6 @@
 ############################################################################
 # CMakeLists.txt
-# Copyright (C) 2014  Belledonne Communications, Grenoble France
+# Copyright (C) 2014-2018  Belledonne Communications, Grenoble France
 #
 ############################################################################
 #
@@ -26,6 +26,7 @@ include(FeatureSummary)
 
 set(ep_base "${LINPHONE_BUILDER_WORK_DIR}/${CONFIG_NAME}")
 set_property(DIRECTORY PROPERTY EP_BASE ${ep_base})
+set(LINPHONE_BUILDER_OPTIONS_DIR "${CMAKE_CURRENT_LIST_DIR}/../options")
 
 
 # Define the architecture. It will be used to generate the URL to get prebuilt dependencies.
@@ -48,6 +49,7 @@ endif()
 set(LINPHONE_BUILDER_EP_VARS)
 set(LINPHONE_BUILDER_INCLUDED_BUILDERS)
 set(LINPHONE_BUILDER_INCLUDED_BUILDERS_TO_EXCLUDE)
+set(LINPHONE_BUILDER_SOURCE_PACKAGE_BUILDERS)
 set(LINPHONE_BUILDER_EXTERNAL_SOURCE_PATH_BUILDERS)
 set(LINPHONE_BUILDER_SYSTEM_DEPENDENCIES_BUILDERS)
 
@@ -116,6 +118,7 @@ list(APPEND LINPHONE_BUILDER_EP_VARS
 if(CMAKE_CROSSCOMPILING)
 	list(APPEND LINPHONE_BUILDER_EP_VARS
 		CMAKE_SYSTEM_NAME:STRING
+		CMAKE_SYSTEM_PROCESSOR:STRING
 		CMAKE_SYSTEM_VERSION:STRING
 	)
 endif()
@@ -220,13 +223,18 @@ macro(lcb_add_target_dependencies TARGET_NAME)
 	endforeach()
 endmacro()
 
+# DEPRECATED: Use lcb_define_targets() instead
 macro(lcb_define_target TARGET_NAME)
-	unset(TARGET_${TARGET_NAME}_DEPENDENCIES)
 	set(_args "${ARGN}")
-	lcb_add_target_dependencies("${TARGET_NAME}" ${_args})
-	list(APPEND TARGET_${TARGET_NAME}_DEPENDENCIES "${TARGET_NAME}")
 	list(APPEND LINPHONE_BUILDER_TARGETS "${TARGET_NAME}")
 	set_property(CACHE LINPHONE_BUILDER_TARGET PROPERTY STRINGS ${LINPHONE_BUILDER_TARGETS})
+endmacro()
+
+macro(lcb_define_targets)
+	set(_args "${ARGN}")
+	foreach(_arg IN LISTS _args)
+		lcb_define_target("${_arg}")
+	endforeach()
 endmacro()
 
 macro(lcb_add_builder_to_target TARGET_NAME BUILDER_NAME)
@@ -243,11 +251,6 @@ endmacro()
 macro(lcb_declare_target TARGET_NAME)
 	add_custom_target(TARGET_${TARGET_NAME} ALL)
 	add_dependencies(TARGET_linphone_builder TARGET_${TARGET_NAME})
-	foreach(_dependency IN LISTS TARGET_${TARGET_NAME}_DEPENDENCIES)
-		if(NOT _dependency STREQUAL "${TARGET_NAME}")
-			add_dependencies(TARGET_${TARGET_NAME} TARGET_${_dependency})
-		endif()
-	endforeach()
 	unset(_dependencies)
 	linphone_builder_add_builder_to_target(TARGET_${TARGET_NAME} "${TARGET_NAME}" TRUE _dependencies)
 	list(APPEND LINPHONE_BUILDER_INCLUDED_BUILDERS ${_dependencies})
@@ -255,9 +258,7 @@ endmacro()
 
 macro(lcb_declare_targets)
 	add_custom_target(TARGET_linphone_builder ALL)
-	foreach(_target IN LISTS TARGET_${LINPHONE_BUILDER_TARGET}_DEPENDENCIES)
-		lcb_declare_target("${_target}")
-	endforeach()
+	lcb_declare_target("${LINPHONE_BUILDER_TARGET}")
 endmacro()
 
 
@@ -278,6 +279,9 @@ macro(linphone_builder_include_builder BUILDER INCLUDE_AFTER DEPENDENCIES _inclu
 		endif()
 		if(EXISTS "${_builder_filepath}")
 			message(STATUS "Including builder ${BUILDER}")
+			if(EXISTS ${LINPHONE_BUILDER_OPTIONS_DIR}/${BUILDER}.cmake)
+				include(${LINPHONE_BUILDER_OPTIONS_DIR}/${BUILDER}.cmake)
+			endif()
 			set(LINPHONE_BUILDER_CURRENT_BUILDER "${BUILDER}")
 			include(${_builder_filepath})
 			if(INCLUDE_AFTER)
@@ -286,6 +290,7 @@ macro(linphone_builder_include_builder BUILDER INCLUDE_AFTER DEPENDENCIES _inclu
 				list(INSERT ${DEPENDENCIES} 0 ${BUILDER})
 			endif()
 			set(${_included} 1)
+			unset(LINPHONE_BUILDER_CURRENT_BUILDER)
 		endif()
 	endif()
 	unset(_already_included)
@@ -363,7 +368,7 @@ macro(linphone_builder_apply_flags)
 	endif()
 	if(LINPHONE_BUILDER_CXXFLAGS)
 		set(CMAKE_CXX_FLAGS_${BUILD_TYPE} "${CMAKE_CXX_FLAGS_${BUILD_TYPE}} ${LINPHONE_BUILDER_CXXFLAGS}")
-		set(AUTOTOOLS_CXX_FLAGS "{AUTOTOOLS_CXX_FLAGS} ${LINPHONE_BUILDER_CXX_FLAGS}")
+		set(AUTOTOOLS_CXX_FLAGS "${AUTOTOOLS_CXX_FLAGS} ${LINPHONE_BUILDER_CXX_FLAGS}")
 	endif()
 	if(LINPHONE_BUILDER_OBJCFLAGS)
 		set(CMAKE_C_FLAGS_${BUILD_TYPE} "${CMAKE_C_FLAGS_${BUILD_TYPE}} ${LINPHONE_BUILDER_OBJCFLAGS}")
@@ -398,6 +403,11 @@ macro(linphone_builder_apply_extra_flags PROJNAME)
 	else()
 		set(_no_warnings_flag "-w")
 	endif()
+	set(SAVED_CMAKE_C_FLAGS "${CMAKE_C_FLAGS_${BUILD_TYPE}}")
+	set(SAVED_CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS_${BUILD_TYPE}}")
+	set(SAVED_CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS_${BUILD_TYPE}}")
+	set(SAVED_CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS_${BUILD_TYPE}}")
+	set(SAVED_CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS_${BUILD_TYPE}}")
 	if(EP_${PROJNAME}_BUILD_METHOD STREQUAL "autotools")
 		set(ep_asflags "${ep_asflags} ${EP_${PROJNAME}_EXTRA_ASFLAGS}")
 		set(ep_cppflags "${ep_cppflags} ${EP_${PROJNAME}_EXTRA_CPPFLAGS}")
@@ -409,11 +419,6 @@ macro(linphone_builder_apply_extra_flags PROJNAME)
 			set(ep_cppflags "${ep_cppflags} ${_no_warnings_flag}")
 		endif()
 	else()
-		set(SAVED_CMAKE_C_FLAGS "${CMAKE_C_FLAGS_${BUILD_TYPE}}")
-		set(SAVED_CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS_${BUILD_TYPE}}")
-		set(SAVED_CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS_${BUILD_TYPE}}")
-		set(SAVED_CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS_${BUILD_TYPE}}")
-		set(SAVED_CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS_${BUILD_TYPE}}")
 		if(EP_${PROJNAME}_EXTRA_CFLAGS)
 			set(CMAKE_C_FLAGS_${BUILD_TYPE} "${CMAKE_C_FLAGS_${BUILD_TYPE}} ${EP_${PROJNAME}_EXTRA_CFLAGS}")
 		endif()
@@ -428,6 +433,15 @@ macro(linphone_builder_apply_extra_flags PROJNAME)
 		if(EP_${PROJNAME}_IGNORE_WARNINGS)
 			set(CMAKE_C_FLAGS_${BUILD_TYPE} "${CMAKE_C_FLAGS_${BUILD_TYPE}} ${_no_warnings_flag}")
 			set(CMAKE_CXX_FLAGS_${BUILD_TYPE} "${CMAKE_CXX_FLAGS_${BUILD_TYPE}} ${_no_warnings_flag}")
+		endif()
+		if(ENABLE_SANITIZER AND EP_${PROJNAME}_SANITIZABLE)
+			set(sanitize_flags "-fsanitize=address")
+			set(CMAKE_C_FLAGS_${BUILD_TYPE} "${CMAKE_C_FLAGS_${BUILD_TYPE}} ${sanitize_flags}")
+			set(CMAKE_CXX_FLAGS_${BUILD_TYPE} "${CMAKE_CXX_FLAGS_${BUILD_TYPE}} ${sanitize_flags}")
+			set(CMAKE_EXE_LINKER_FLAGS_${BUILD_TYPE} "${CMAKE_EXE_LINKER_FLAGS_${BUILD_TYPE}} ${sanitize_flags}")
+			set(CMAKE_MODULE_LINKER_FLAGS_${BUILD_TYPE} "${CMAKE_MODULE_LINKER_FLAGS_${BUILD_TYPE}} ${sanitize_flags}")
+			set(CMAKE_SHARED_LINKER_FLAGS_${BUILD_TYPE} "${CMAKE_SHARED_LINKER_FLAGS_${BUILD_TYPE}} ${sanitize_flags}")
+			unset(sanitize_flags)
 		endif()
 	endif()
 	unset(BUILD_TYPE)
@@ -581,6 +595,10 @@ macro(linphone_builder_filter_out_inexistent_dependencies PROJNAME)
 endmacro()
 
 macro(linphone_builder_add_external_project PROJNAME)
+	if(LINPHONE_BUILDER_ENABLE_RPM_PACKAGING AND NOT EP_${PROJNAME}_BUILD_METHOD STREQUAL "dummy")
+		set(EP_${PROJNAME}_BUILD_METHOD "rpm")
+	endif()
+
 	if(LINPHONE_BUILDER_EXTERNAL_SOURCE_PATH)
 		foreach(SUBDIR ${EP_${PROJNAME}_EXTERNAL_SOURCE_PATHS})
 			if(NOT EP_${PROJNAME}_SOURCE_DIR)
@@ -594,6 +612,9 @@ macro(linphone_builder_add_external_project PROJNAME)
 				endif()
 			endif()
 		endforeach()
+	endif()
+	if(EP_${PROJNAME}_PACKAGE_SOURCE)
+		list(APPEND LINPHONE_BUILDER_SOURCE_PACKAGE_BUILDERS ${PROJNAME})
 	endif()
 
 	linphone_builder_set_ep_directories(${PROJNAME})
@@ -728,7 +749,7 @@ macro(linphone_builder_add_external_project PROJNAME)
 
 		# some specific RPMBUILD options to pass for this particular project
 		if(EP_${PROJNAME}_RPMBUILD_OPTIONS)
-			set(LINPHONE_BUILDER_RPMBUILD_OPTIONS "${EP_${PROJNAME}_RPMBUILD_OPTIONS}")
+			string(REPLACE ";" " " LINPHONE_BUILDER_RPMBUILD_OPTIONS "${EP_${PROJNAME}_RPMBUILD_OPTIONS}")
 		else()
 			set(LINPHONE_BUILDER_RPMBUILD_OPTIONS "")
 		endif()
@@ -747,9 +768,25 @@ macro(linphone_builder_add_external_project PROJNAME)
 			set(LINPHONE_BUILDER_CONFIGURE_EXTRA_CMD "")
 		endif()
 
+		if(NOT EP_${PROJNAME}_LINKING_TYPE) # Apply default CMake linking type if not set explicitely
+			if(EP_${PROJNAME}_PLUGIN)
+				set(EP_${PROJNAME}_LINKING_TYPE ${DEFAULT_VALUE_CMAKE_PLUGIN_LINKING_TYPE})
+			else()
+				set(EP_${PROJNAME}_LINKING_TYPE ${DEFAULT_VALUE_CMAKE_LINKING_TYPE})
+			endif()
+		endif()
+
 		# allow to have special command steps
-		linphone_builder_configure_file_for_project(${PROJNAME} CONFIGURE ${CMAKE_CURRENT_SOURCE_DIR}/cmake/configure.rpm.sh.cmake ${CMAKE_CURRENT_BINARY_DIR}/EP_${PROJNAME}_configure_rpm.sh)
-		linphone_builder_configure_file_for_project(${PROJNAME} BUILD ${CMAKE_CURRENT_SOURCE_DIR}/cmake/build.rpm.sh.cmake ${CMAKE_CURRENT_BINARY_DIR}/EP_${PROJNAME}_build_rpm.sh)
+		if(EP_${PROJNAME}_USE_AUTOTOOLS_FOR_RPM)
+			linphone_builder_configure_file_for_project(${PROJNAME} CONFIGURE ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Autotools/configure.rpm.sh.cmake ${CMAKE_CURRENT_BINARY_DIR}/EP_${PROJNAME}_configure_rpm.sh)
+			linphone_builder_configure_file_for_project(${PROJNAME} BUILD ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Autotools/build.rpm.sh.cmake ${CMAKE_CURRENT_BINARY_DIR}/EP_${PROJNAME}_build_rpm.sh)
+		else()
+			set(CURRENT_PROJ_CMAKE_OPTIONS ${EP_${PROJNAME}_CMAKE_OPTIONS} ${EP_${PROJNAME}_LINKING_TYPE})
+			string(REPLACE ";" " " CURRENT_PROJ_CMAKE_OPTIONS  "${CURRENT_PROJ_CMAKE_OPTIONS}")
+			linphone_builder_configure_file_for_project(${PROJNAME} CONFIGURE ${CMAKE_CURRENT_SOURCE_DIR}/cmake/configure.rpm.sh.cmake ${CMAKE_CURRENT_BINARY_DIR}/EP_${PROJNAME}_configure_rpm.sh)
+			linphone_builder_configure_file_for_project(${PROJNAME} BUILD ${CMAKE_CURRENT_SOURCE_DIR}/cmake/build.rpm.sh.cmake ${CMAKE_CURRENT_BINARY_DIR}/EP_${PROJNAME}_build_rpm.sh)
+			unset(CURRENT_PROJ_CMAKE_OPTIONS)
+		endif()
 		linphone_builder_configure_file_for_project(${PROJNAME} INSTALL ${CMAKE_CURRENT_SOURCE_DIR}/cmake/install.rpm.sh.cmake ${CMAKE_CURRENT_BINARY_DIR}/EP_${PROJNAME}_install_rpm.sh)
 
 		set(BUILD_COMMANDS
@@ -810,6 +847,14 @@ macro(linphone_builder_add_external_project PROJNAME)
 		ExternalProject_Add_Step(EP_${PROJNAME} postconfig
 			COMMAND ${CMAKE_COMMAND} -DPYTHON_EXECUTABLE=${PYTHON_EXECUTABLE} -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR} -DINSTALL_PREFIX=${CMAKE_INSTALL_PREFIX} -P ${CMAKE_CURRENT_SOURCE_DIR}/builders/${PROJNAME}/postinstall.cmake
 			COMMENT "Performing post-configuration for 'EP_${PROJNAME}'"
+			DEPENDEES install
+			WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+		)
+	endif()
+	if(ENABLE_SOURCE_PACKAGING AND EP_${PROJNAME}_PACKAGE_SOURCE)
+		ExternalProject_Add_Step(EP_${PROJNAME} package_source
+			COMMAND ${CMAKE_COMMAND} --build ${ep_build} --target package_source
+			COMMENT "Creating source package for 'EP_${PROJNAME}'"
 			DEPENDEES install
 			WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 		)
@@ -967,7 +1012,41 @@ macro(linphone_builder_add_grouped_external_source_path_projects)
 	endif()
 endmacro()
 
+macro(linphone_builder_sort_builders)
+	set(_ordered_builders)
+	set(_to_process_builders ${LINPHONE_BUILDER_INCLUDED_BUILDERS})
+	list(LENGTH _to_process_builders _remaining_builders_count)
+	while(_remaining_builders_count GREATER 0)
+		set(_processed_builders)
+		foreach(_builder IN LISTS _to_process_builders)
+			if(NOT EP_${_builder}_DEPENDENCIES)
+				list(APPEND _ordered_builders ${_builder})
+				list(APPEND _processed_builders ${_builder})
+			else()
+				set(_to_add TRUE)
+				foreach(_dep IN LISTS EP_${_builder}_DEPENDENCIES)
+					string(SUBSTRING "${_dep}" 3 -1 _dep)
+					list(FIND _ordered_builders ${_dep} _found)
+					if(_found EQUAL -1)
+						set(_to_add FALSE)
+					endif()
+				endforeach()
+				if(_to_add)
+					list(APPEND _ordered_builders ${_builder})
+					list(APPEND _processed_builders ${_builder})
+				endif()
+			endif()
+		endforeach()
+		foreach(_builder IN LISTS _processed_builders)
+			list(REMOVE_ITEM _to_process_builders ${_builder})
+		endforeach()
+		list(LENGTH _to_process_builders _remaining_builders_count)
+	endwhile()
+	set(LINPHONE_BUILDER_INCLUDED_BUILDERS ${_ordered_builders})
+endmacro()
+
 macro(linphone_builder_add_projects)
+	linphone_builder_sort_builders()
 	linphone_builder_add_external_projects()
 	linphone_builder_add_grouped_external_source_path_projects()
 endmacro()
@@ -989,6 +1068,30 @@ macro(linphone_builder_add_dummy_libraries_generation)
 	endif()
 endmacro()
 
+macro(linphone_builder_add_package_source_check_project)
+	if(ENABLE_SOURCE_PACKAGING AND LINPHONE_BUILDER_SOURCE_PACKAGE_BUILDERS)
+		string(REPLACE ";" " " LINPHONE_BUILDER_SOURCE_PACKAGE_BUILDERS "${LINPHONE_BUILDER_SOURCE_PACKAGE_BUILDERS}")
+		linphone_builder_set_ep_directories(package_source_check)
+		linphone_builder_set_ep_generator()
+		linphone_builder_expand_external_project_vars()
+		ExternalProject_Add(EP_package_source_check
+			DEPENDS TARGET_linphone_builder
+			TMP_DIR "${ep_tmp}"
+			BINARY_DIR "${ep_build}"
+			SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/cmake/package_source_check"
+			DOWNLOAD_COMMAND ""
+			CMAKE_GENERATOR ${ep_generator}
+			CMAKE_ARGS -DCMAKE_PREFIX_PATH=${CMAKE_INSTALL_PREFIX}/package_source_check -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}/package_source_check -DLINPHONE_BUILDER_WORK_DIR=${LINPHONE_BUILDER_WORK_DIR} -DLINPHONE_BUILDER_SOURCE_PACKAGE_BUILDERS=${LINPHONE_BUILDER_SOURCE_PACKAGE_BUILDERS} -DGENERATOR=${ep_generator}
+		)
+	endif()
+endmacro()
+
+macro(lcb_check_current_builder)
+	if(NOT DEFINED LINPHONE_BUILDER_CURRENT_BUILDER)
+		message(FATAL_ERROR "lcb_ macro used outside of builder definition")
+	endif()
+endmacro()
+
 macro(lcb_builder_cmake_options BUILDER)
 	set(_args "${ARGN}")
 	foreach(_arg IN LISTS _args)
@@ -1007,6 +1110,7 @@ macro(lcb_builder_cmake_options BUILDER)
 endmacro()
 
 macro(lcb_cmake_options)
+	lcb_check_current_builder()
 	lcb_builder_cmake_options("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${ARGN})
 endmacro()
 
@@ -1018,6 +1122,7 @@ macro(lcb_builder_configure_options BUILDER)
 endmacro()
 
 macro(lcb_configure_options)
+	lcb_check_current_builder()
 	lcb_builder_configure_options("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${ARGN})
 endmacro()
 
@@ -1030,6 +1135,7 @@ macro(lcb_builder_cross_compilation_options BUILDER)
 endmacro()
 
 macro(lcb_cross_compilation_options)
+	lcb_check_current_builder()
 	lcb_builder_cross_compilation_options("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${ARGN})
 endmacro()
 
@@ -1041,6 +1147,7 @@ macro(lcb_builder_make_options BUILDER)
 endmacro()
 
 macro(lcb_make_options)
+	lcb_check_current_builder()
 	lcb_builder_make_options("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${ARGN})
 endmacro()
 
@@ -1049,6 +1156,7 @@ macro(lcb_builder_extra_cflags BUILDER CFLAGS)
 endmacro()
 
 macro(lcb_extra_cflags CFLAGS)
+	lcb_check_current_builder()
 	lcb_builder_extra_cflags("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${CFLAGS}")
 endmacro()
 
@@ -1057,6 +1165,7 @@ macro(lcb_builder_extra_cppflags BUILDER CPPFLAGS)
 endmacro()
 
 macro(lcb_extra_cppflags CPPFLAGS)
+	lcb_check_current_builder()
 	lcb_builder_extra_cppflags("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${CPPFLAGS}")
 endmacro()
 
@@ -1065,6 +1174,7 @@ macro(lcb_builder_extra_cxxflags BUILDER CXXFLAGS)
 endmacro()
 
 macro(lcb_extra_cxxflags CPPFLAGS)
+	lcb_check_current_builder()
 	lcb_builder_extra_cxxflags("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${CXXFLAGS}")
 endmacro()
 
@@ -1073,6 +1183,7 @@ macro(lcb_builder_extra_ldflags BUILDER LDFLAGS)
 endmacro()
 
 macro(lcb_extra_ldflags LDFLAGS)
+	lcb_check_current_builder()
 	lcb_builder_extra_ldflags("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${LDFLAGS}")
 endmacro()
 
@@ -1081,6 +1192,7 @@ macro(lcb_builder_extra_asflags BUILDER ASFLAGS)
 endmacro()
 
 macro(lcb_extra_asflags ASFLAGS)
+	lcb_check_current_builder()
 	lcb_builder_extra_asflags("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${ASFLAGS}")
 endmacro()
 
@@ -1096,11 +1208,15 @@ macro(lcb_builder_dependencies BUILDER)
 		endif()
 		if(_add_dependency)
 			list(APPEND EP_${BUILDER}_DEPENDENCIES "EP_${_dependency}")
+			if(EXISTS ${LINPHONE_BUILDER_OPTIONS_DIR}/${_dependency}.cmake)
+				include(${LINPHONE_BUILDER_OPTIONS_DIR}/${_dependency}.cmake)
+			endif()
 		endif()
 	endforeach()
 endmacro()
 
 macro(lcb_dependencies)
+	lcb_check_current_builder()
 	lcb_builder_dependencies("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${ARGN})
 endmacro()
 
@@ -1109,6 +1225,7 @@ macro(lcb_builder_git_repository BUILDER GIT_REPOSITORY)
 endmacro()
 
 macro(lcb_git_repository GIT_REPOSITORY)
+	lcb_check_current_builder()
 	lcb_builder_git_repository("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${GIT_REPOSITORY}")
 endmacro()
 
@@ -1117,6 +1234,7 @@ macro(lcb_builder_git_tag_latest BUILDER GIT_TAG_LATEST)
 endmacro()
 
 macro(lcb_git_tag_latest GIT_TAG_LATEST)
+	lcb_check_current_builder()
 	lcb_builder_git_tag_latest("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${GIT_TAG_LATEST}")
 endmacro()
 
@@ -1125,6 +1243,7 @@ macro(lcb_builder_git_tag BUILDER GIT_TAG)
 endmacro()
 
 macro(lcb_git_tag GIT_TAG)
+	lcb_check_current_builder()
 	lcb_builder_git_tag("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${GIT_TAG}")
 endmacro()
 
@@ -1133,6 +1252,7 @@ macro(lcb_builder_external_source_paths BUILDER)
 endmacro()
 
 macro(lcb_external_source_paths)
+	lcb_check_current_builder()
 	lcb_builder_external_source_paths("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${ARGN})
 endmacro()
 
@@ -1141,7 +1261,17 @@ macro(lcb_builder_groupable BUILDER BOOL_VALUE)
 endmacro()
 
 macro(lcb_groupable BOOL_VALUE)
+	lcb_check_current_builder()
 	lcb_builder_groupable("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${BOOL_VALUE})
+endmacro()
+
+macro(lcb_builder_package_source BUILDER BOOL_VALUE)
+	set(EP_${BUILDER}_PACKAGE_SOURCE ${BOOL_VALUE})
+endmacro()
+
+macro(lcb_package_source BOOL_VALUE)
+	lcb_check_current_builder()
+	lcb_builder_package_source("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${BOOL_VALUE})
 endmacro()
 
 macro(lcb_builder_spec_file BUILDER SPEC_FILE)
@@ -1149,6 +1279,7 @@ macro(lcb_builder_spec_file BUILDER SPEC_FILE)
 endmacro()
 
 macro(lcb_spec_file SPEC_FILE)
+	lcb_check_current_builder()
 	lcb_builder_spec_file("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${SPEC_FILE}")
 endmacro()
 
@@ -1157,7 +1288,17 @@ macro(lcb_builder_use_autogen BUILDER BOOL_VALUE)
 endmacro()
 
 macro(lcb_use_autogen BOOL_VALUE)
-	lcb_builder_use_autogen(${BOOL_VALUE})
+	lcb_check_current_builder()
+	lcb_builder_use_autogen("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${BOOL_VALUE})
+endmacro()
+
+macro(lcb_builder_use_autotools_for_rpm BUILDER BOOL_VALUE)
+	set(EP_${BUILDER}_USE_AUTOTOOLS_FOR_RPM ${BOOL_VALUE})
+endmacro()
+
+macro(lcb_use_autotools_for_rpm BOOL_VALUE)
+	lcb_check_current_builder()
+	lcb_builder_use_autotools_for_rpm("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${BOOL_VALUE})
 endmacro()
 
 macro(lcb_builder_use_autoreconf BUILDER BOOL_VALUE)
@@ -1165,6 +1306,7 @@ macro(lcb_builder_use_autoreconf BUILDER BOOL_VALUE)
 endmacro()
 
 macro(lcb_use_autoreconf BOOL_VALUE)
+	lcb_check_current_builder()
 	lcb_builder_use_autoreconf("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${BOOL_VALUE})
 endmacro()
 
@@ -1177,6 +1319,7 @@ macro(lcb_builder_linking_type BUILDER)
 endmacro()
 
 macro(lcb_linking_type)
+	lcb_check_current_builder()
 	lcb_builder_linking_type("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${ARGN})
 endmacro()
 
@@ -1185,6 +1328,7 @@ macro(lcb_builder_ignore_warnings BUILDER BOOL_VALUE)
 endmacro()
 
 macro(lcb_ignore_warnings BOOL_VALUE)
+	lcb_check_current_builder()
 	lcb_builder_ignore_warnings("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${BOOL_VALUE})
 endmacro()
 
@@ -1193,6 +1337,7 @@ macro(lcb_builder_may_be_found_on_system BUILDER BOOL_VALUE)
 endmacro()
 
 macro(lcb_may_be_found_on_system BOOL_VALUE)
+	lcb_check_current_builder()
 	lcb_builder_may_be_found_on_system("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${BOOL_VALUE})
 endmacro()
 
@@ -1201,6 +1346,7 @@ macro(lcb_builder_rpmbuild_name BUILDER RPMBUILD_NAME)
 endmacro()
 
 macro(lcb_rpmbuild_name RPMBUILD_NAME)
+	lcb_check_current_builder()
 	lcb_builder_rpmbuild_name("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${RPMBUILD_NAME}")
 endmacro()
 
@@ -1209,6 +1355,7 @@ macro(lcb_builder_plugin BUILDER BOOL_VALUE)
 endmacro()
 
 macro(lcb_plugin BOOL_VALUE)
+	lcb_check_current_builder()
 	lcb_builder_plugin("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${BOOL_VALUE})
 endmacro()
 
@@ -1217,6 +1364,7 @@ macro(lcb_builder_build_method BUILDER BUILD_METHOD)
 endmacro()
 
 macro(lcb_build_method BUILD_METHOD)
+	lcb_check_current_builder()
 	lcb_builder_build_method("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${BUILD_METHOD}")
 endmacro()
 
@@ -1225,6 +1373,7 @@ macro(lcb_builder_url BUILDER URL)
 endmacro()
 
 macro(lcb_url URL)
+	lcb_check_current_builder()
 	lcb_builder_url("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${URL}")
 endmacro()
 
@@ -1233,6 +1382,7 @@ macro(lcb_builder_url_hash BUILDER URL_HASH)
 endmacro()
 
 macro(lcb_url_hash URL_HASH)
+	lcb_check_current_builder()
 	lcb_builder_url_hash("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${URL_HASH}")
 endmacro()
 
@@ -1244,6 +1394,7 @@ macro(lcb_builder_patch_command BUILDER)
 endmacro()
 
 macro(lcb_patch_command)
+	lcb_check_current_builder()
 	lcb_builder_patch_command("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${ARGN})
 endmacro()
 
@@ -1252,6 +1403,7 @@ macro(lcb_builder_configure_command_source BUILDER COMMAND_SOURCE)
 endmacro()
 
 macro(lcb_configure_command_source COMMAND_SOURCE)
+	lcb_check_current_builder()
 	lcb_builder_configure_command_source("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${COMMAND_SOURCE}")
 endmacro()
 
@@ -1260,6 +1412,7 @@ macro(lcb_builder_build_command_source BUILDER COMMAND_SOURCE)
 endmacro()
 
 macro(lcb_build_command_source COMMAND_SOURCE)
+	lcb_check_current_builder()
 	lcb_builder_build_command_source("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${COMMAND_SOURCE}")
 endmacro()
 
@@ -1268,6 +1421,7 @@ macro(lcb_builder_install_command_source BUILDER COMMAND_SOURCE)
 endmacro()
 
 macro(lcb_install_command_source COMMAND_SOURCE)
+	lcb_check_current_builder()
 	lcb_builder_install_command_source("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${COMMAND_SOURCE}")
 endmacro()
 
@@ -1276,6 +1430,7 @@ macro(lcb_builder_additional_options BUILDER ADDITIONAL_OPTIONS)
 endmacro()
 
 macro(lcb_additional_options ADDITIONAL_OPTIONS)
+	lcb_check_current_builder()
 	lcb_builder_additional_options("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${ADDITIONAL_OPTIONS}")
 endmacro()
 
@@ -1284,6 +1439,7 @@ macro(lcb_builder_build_in_source_tree BUILDER BOOL_VALUE)
 endmacro()
 
 macro(lcb_build_in_source_tree BOOL_VALUE)
+	lcb_check_current_builder()
 	lcb_builder_build_in_source_tree("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${BOOL_VALUE})
 endmacro()
 
@@ -1292,6 +1448,7 @@ macro(lcb_builder_configure_env BUILDER CONFIGURE_ENV)
 endmacro()
 
 macro(lcb_configure_env CONFIGURE_ENV)
+	lcb_check_current_builder()
 	lcb_builder_configure_env("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${CONFIGURE_ENV}")
 endmacro()
 
@@ -1300,6 +1457,7 @@ macro(lcb_builder_config_h_file BUILDER CONFIG_H_FILE)
 endmacro()
 
 macro(lcb_config_h_file CONFIG_H_FILE)
+	lcb_check_current_builder()
 	lcb_builder_config_h_file("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${CONFIG_H_FILE}")
 endmacro()
 
@@ -1308,6 +1466,7 @@ macro(lcb_builder_do_not_use_cmake_flags BUILDER BOOL_VALUE)
 endmacro()
 
 macro(lcb_do_not_use_cmake_flags BOOL_VALUE)
+	lcb_check_current_builder()
 	lcb_builder_do_not_use_cmake_flags("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${BOOL_VALUE})
 endmacro()
 
@@ -1316,6 +1475,7 @@ macro(lcb_builder_install_target BUILDER INSTALL_TARGET)
 endmacro()
 
 macro(lcb_install_target INSTALL_TARGET)
+	lcb_check_current_builder()
 	lcb_builder_install_target("${LINPHONE_BUILDER_CURRENT_BUILDER}" "${INSTALL_TARGET}")
 endmacro()
 
@@ -1324,7 +1484,29 @@ macro(lcb_builder_use_c_compiler_for_assembler BUILDER BOOL_VALUE)
 endmacro()
 
 macro(lcb_use_c_compiler_for_assembler BOOL_VALUE)
+	lcb_check_current_builder()
 	lcb_builder_use_c_compiler_for_assembler("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${BOOL_VALUE})
+endmacro()
+
+macro(lcb_builder_rpmbuild_options BUILDER)
+	set(_args "${ARGN}")
+	foreach(_arg IN LISTS _args)
+		list(APPEND EP_${BUILDER}_RPMBUILD_OPTIONS "${_arg}")
+	endforeach()
+endmacro()
+
+macro(lcb_rpmbuild_options)
+	lcb_check_current_builder()
+	lcb_builder_rpmbuild_options("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${ARGN})
+endmacro()
+
+macro(lcb_builder_sanitizable BUILDER BOOL_VALUE)
+	set(EP_${BUILDER}_SANITIZABLE ${BOOL_VALUE})
+endmacro()
+
+macro(lcb_sanitizable BOOL_VALUE)
+	lcb_check_current_builder()
+	lcb_builder_sanitizable("${LINPHONE_BUILDER_CURRENT_BUILDER}" ${BOOL_VALUE})
 endmacro()
 
 macro(lcb_blacklist_dependencies)

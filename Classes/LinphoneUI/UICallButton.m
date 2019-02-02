@@ -63,7 +63,8 @@
 	if (address.length == 0) {
 		LinphoneCallLog *log = linphone_core_get_last_outgoing_call_log(LC);
 		if (log) {
-			LinphoneAddress *to = linphone_call_log_get_to(log);
+			const LinphoneAddress *to = linphone_call_log_get_to_address(log);
+#if 0	// Changed Linphone code - Get the phone number only, not the SIP URI
 			const char *domain = linphone_address_get_domain(to);
 			char *bis_address = NULL;
 			LinphoneProxyConfig *def_proxy = linphone_core_get_default_proxy_config(LC);
@@ -80,6 +81,11 @@
 			}
 			[addressField setText:[NSString stringWithUTF8String:bis_address]];
 			ms_free(bis_address);
+#else
+			const char *toNumber = linphone_address_get_username(to);
+			const char *numberNoPlus = &toNumber [1];	// Remove the + sign (first character)
+			[addressField setText : [NSString stringWithUTF8String : numberNoPlus]];
+#endif
 			// return after filling the address, let the user confirm the call by pressing again
 			return;
 		}

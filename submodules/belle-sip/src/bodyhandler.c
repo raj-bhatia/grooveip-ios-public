@@ -1,19 +1,19 @@
 /*
 	belle-sip - SIP (RFC3261) library.
-    Copyright (C) 2014  Belledonne Communications SARL
+	Copyright (C) 2010-2018  Belledonne Communications SARL
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 2 of the License, or
+	(at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "belle_sip_internal.h"
@@ -75,6 +75,8 @@ BELLE_SIP_INSTANCIATE_CUSTOM_VPTR_BEGIN(belle_sip_body_handler_t)
 		(belle_sip_object_destroy_t) belle_sip_body_handler_destroy,
 		(belle_sip_object_clone_t) belle_sip_body_handler_clone,
 		(belle_sip_object_marshal_t) belle_sip_body_handler_marshal,
+		(belle_sip_object_on_first_ref_t) NULL,
+		(belle_sip_object_on_last_ref_t) NULL,
 		BELLE_SIP_DEFAULT_BUFSIZE_HINT
 	},
 	NULL, /* begin_recv_transfer */
@@ -122,6 +124,7 @@ size_t belle_sip_body_handler_get_transfered_size(const belle_sip_body_handler_t
 }
 
 static void update_progress(belle_sip_body_handler_t *obj, belle_sip_message_t *msg){
+	belle_sip_debug("body handler [%p] : %llu bytes exchanged of %llu ", obj, (unsigned long long)obj->transfered_size, (unsigned long long)obj->expected_size);
 	if (obj->progress_cb)
 		obj->progress_cb(obj,msg,obj->user_data,obj->transfered_size,obj->expected_size);
 }
@@ -252,10 +255,14 @@ void belle_sip_memory_body_handler_set_buffer(belle_sip_memory_body_handler_t *o
 	obj->buffer = (uint8_t *)buffer;
 }
 
+#define BELLE_SIP_MEMORY_BODY_HANDLER_MINIMUM_DEFLATE_INPUT_SIZE 256
 #define BELLE_SIP_MEMORY_BODY_HANDLER_ZLIB_INITIAL_SIZE 2048
 
-void belle_sip_memory_body_handler_apply_encoding(belle_sip_memory_body_handler_t *obj, const char *encoding) {
-	if ((obj->buffer == NULL) || (obj->encoding_applied == TRUE)) return;
+int belle_sip_memory_body_handler_apply_encoding(belle_sip_memory_body_handler_t *obj, const char *encoding) {
+	if (obj->encoding_applied == TRUE)
+		return 0;
+	if (!obj->buffer || (belle_sip_body_handler_get_size(BELLE_SIP_BODY_HANDLER(obj)) < BELLE_SIP_MEMORY_BODY_HANDLER_MINIMUM_DEFLATE_INPUT_SIZE))
+		return -1;
 
 #ifdef HAVE_ZLIB
 	if (strcmp(encoding, "deflate") == 0) {
@@ -272,7 +279,10 @@ void belle_sip_memory_body_handler_apply_encoding(belle_sip_memory_body_handler_
 		strm.zfree = Z_NULL;
 		strm.opaque = Z_NULL;
 		ret = deflateInit(&strm, Z_DEFAULT_COMPRESSION);
-		if (ret != Z_OK) return;
+		if (ret != Z_OK) {
+			belle_sip_free(outbuf);
+			return -1;
+		}
 		strm.avail_in = (uInt)initial_size;
 		strm.next_in = obj->buffer;
 		do {
@@ -290,15 +300,22 @@ void belle_sip_memory_body_handler_apply_encoding(belle_sip_memory_body_handler_
 		} while (strm.avail_out == 0);
 		deflateEnd(&strm);
 		final_size = outbuf_ptr - outbuf;
+		if ((final_size + 27) >= initial_size) { // 27 is the size of the Content-Encoding header
+			belle_sip_message("Body not compressed because its size would have increased");
+			belle_sip_free(outbuf);
+			return -1;
+		}
 		belle_sip_message("Body has been compressed: %u->%u:\n%s", (unsigned int)initial_size, (unsigned int)final_size, obj->buffer);
 		belle_sip_free(obj->buffer);
 		obj->buffer = outbuf;
 		belle_sip_body_handler_set_size(BELLE_SIP_BODY_HANDLER(obj), final_size);
 		obj->encoding_applied = TRUE;
+		return 0;
 	} else
 #endif
 	{
 		belle_sip_warning("%s: unknown encoding '%s'", __FUNCTION__, encoding);
+		return -1;
 	}
 }
 
@@ -540,7 +557,7 @@ static void belle_sip_file_body_handler_begin_recv_transfer(belle_sip_body_handl
 	if (!obj->file) {
 		bctbx_error("Can't open file %s", obj->filepath);
 	}
-	
+
 	if (obj->user_bh && obj->user_bh->start_cb) {
 		obj->user_bh->start_cb((belle_sip_user_body_handler_t*)&(obj->user_bh->base), obj->user_bh->base.user_data);
 	}
@@ -563,11 +580,11 @@ static void belle_sip_file_body_handler_begin_send_transfer(belle_sip_body_handl
 
 static void belle_sip_file_body_handler_end_transfer(belle_sip_body_handler_t *base) {
 	belle_sip_file_body_handler_t *obj = (belle_sip_file_body_handler_t *)base;
-	
+
 	if (obj->user_bh && obj->user_bh->stop_cb) {
 		obj->user_bh->stop_cb((belle_sip_user_body_handler_t*)&(obj->user_bh->base), obj->user_bh->base.user_data);
 	}
-	
+
 	if (obj->file) {
 		ssize_t ret;
 		ret = bctbx_file_close(obj->file);
@@ -583,11 +600,11 @@ static void belle_sip_file_body_handler_recv_chunk(belle_sip_body_handler_t *bas
 	ssize_t ret;
 
 	if (obj->file == NULL) return;
-	
+
 	if (obj->user_bh && obj->user_bh->recv_cb) {
 		obj->user_bh->recv_cb((belle_sip_user_body_handler_t*)&(obj->user_bh->base), msg, obj->user_bh->base.user_data, offset, buf, size);
 	}
-	
+
 	ret = bctbx_file_write(obj->file, buf, size, offset);
 	if (ret == BCTBX_VFS_ERROR) {
 		bctbx_error("File body handler recv write error at offset %lu", (unsigned long)offset);
@@ -606,12 +623,12 @@ static int belle_sip_file_body_handler_send_chunk(belle_sip_body_handler_t *base
 		return BELLE_SIP_STOP;
 	}
 	*size = (size_t)size_t_ret;
-	
+
 	if (obj->user_bh && obj->user_bh->send_cb) {
 		int result = obj->user_bh->send_cb((belle_sip_user_body_handler_t*)&(obj->user_bh->base), msg, obj->user_bh->base.user_data, offset, buf, size);
 		if (result == BELLE_SIP_STOP) return result;
 	}
-	
+
 	return (((obj->base.expected_size - offset) == (size_t)size_t_ret) || (*size == 0)) ? BELLE_SIP_STOP : BELLE_SIP_CONTINUE;
 }
 
@@ -721,7 +738,7 @@ static void belle_sip_multipart_body_handler_recv_chunk(belle_sip_body_handler_t
 }
 
 static int belle_sip_multipart_body_handler_send_chunk(belle_sip_body_handler_t *obj, belle_sip_message_t *msg, off_t offset,
-							uint8_t *buffer, size_t *size){
+														 uint8_t *buffer, size_t *size){
 	belle_sip_multipart_body_handler_t *obj_multipart=(belle_sip_multipart_body_handler_t*)obj;
 
 	if (obj_multipart->transfer_current_part->data) { /* we have a part, get its content from handler */
@@ -733,7 +750,10 @@ static int belle_sip_multipart_body_handler_send_chunk(belle_sip_body_handler_t 
 
 		if (current_part->transfered_size == 0) { /* Nothing transfered yet on this part, include a separator and the header if exists */
 			size_t headersSize = 0;
-			offsetSize = strlen(obj_multipart->boundary) + 4; /* 4 is for "--" and "\r\n" */
+			if (current_part != (belle_sip_body_handler_t *)obj_multipart->parts->data) {
+				offsetSize += 2; /*delimiter := CRLF dash-boundary*/
+			}
+			offsetSize += boundary_len + 4;  /* 4 is for "--" and "\r\n" */
 
 			if (current_part->headerStringBuffer != NULL) {
 				headersSize = strlen(current_part->headerStringBuffer);
@@ -745,10 +765,12 @@ static int belle_sip_multipart_body_handler_send_chunk(belle_sip_body_handler_t 
 			}
 
 			/* insert separator */
-			memcpy(buffer, "--", 2);
-			memcpy(buffer + 2, obj_multipart->boundary, boundary_len);
-			memcpy(buffer + 2 + boundary_len, "\r\n", 2);
-			offsetSize = boundary_len + 4;
+			if (current_part != (belle_sip_body_handler_t *)obj_multipart->parts->data) {
+				snprintf((char*)buffer, *size, "\r\n--%s\r\n",obj_multipart->boundary); /*delimiter := CRLF dash-boundary*/
+			} else {
+				snprintf((char*)buffer, *size, "--%s\r\n",obj_multipart->boundary);
+			}
+
 			/* insert part header */
 			if (headersSize!=0) {
 				memcpy(buffer+offsetSize, current_part->headerStringBuffer, headersSize);
@@ -781,6 +803,12 @@ static int belle_sip_multipart_body_handler_send_chunk(belle_sip_body_handler_t 
 	return BELLE_SIP_STOP;
 }
 
+/* FIXME: Temporary workaround for -Wcast-function-type. */
+#if __GNUC__ >= 8
+	_Pragma("GCC diagnostic push")
+	_Pragma("GCC diagnostic ignored \"-Wcast-function-type\"")
+#endif // if __GNUC__ >= 8
+
 BELLE_SIP_DECLARE_NO_IMPLEMENTED_INTERFACES(belle_sip_multipart_body_handler_t);
 BELLE_SIP_INSTANCIATE_CUSTOM_VPTR_BEGIN(belle_sip_multipart_body_handler_t)
 	{
@@ -799,6 +827,10 @@ BELLE_SIP_INSTANCIATE_CUSTOM_VPTR_BEGIN(belle_sip_multipart_body_handler_t)
 	}
 BELLE_SIP_INSTANCIATE_CUSTOM_VPTR_END
 
+#if __GNUC__ >= 8
+	_Pragma("GCC diagnostic pop")
+#endif // if __GNUC__ >= 8
+
 static void belle_sip_multipart_body_handler_set_boundary(belle_sip_multipart_body_handler_t *obj, const char *boundary) {
 	if (obj->boundary != NULL) {
 		belle_sip_free(obj->boundary);
@@ -808,6 +840,10 @@ static void belle_sip_multipart_body_handler_set_boundary(belle_sip_multipart_bo
 	} else {
 		obj->boundary = belle_sip_strdup(BELLESIP_MULTIPART_BOUNDARY);
 	}
+}
+
+const char *belle_sip_multipart_body_handler_get_boundary(const belle_sip_multipart_body_handler_t *obj) {
+	return obj->boundary;
 }
 
 belle_sip_multipart_body_handler_t *belle_sip_multipart_body_handler_new(belle_sip_body_handler_progress_callback_t progress_cb, void *data,
@@ -820,7 +856,7 @@ belle_sip_multipart_body_handler_t *belle_sip_multipart_body_handler_new(belle_s
 	return obj;
 }
 
-belle_sip_multipart_body_handler_t *belle_sip_multipart_body_handler_new_from_buffer(void *buffer, size_t bufsize, const char *boundary) {
+belle_sip_multipart_body_handler_t *belle_sip_multipart_body_handler_new_from_buffer(const void *buffer, size_t bufsize, const char *boundary) {
 	belle_sip_multipart_body_handler_t *obj_multipart = belle_sip_object_new(belle_sip_multipart_body_handler_t);
 	belle_sip_body_handler_t *obj = (belle_sip_body_handler_t *)obj_multipart;
 	belle_sip_body_handler_init((belle_sip_body_handler_t *)obj, belle_sip_multipart_body_handler_progress_cb, NULL);
@@ -834,6 +870,10 @@ belle_sip_multipart_body_handler_t *belle_sip_multipart_body_handler_new_from_bu
 
 #define DEFAULT_HEADER_STRING_SIZE 512
 void belle_sip_multipart_body_handler_add_part(belle_sip_multipart_body_handler_t *obj, belle_sip_body_handler_t *part){
+	if (obj->parts != NULL) {
+		obj->base.expected_size += 2; /*delimiter := CRLF dash-boundary*/
+		//add initial CRLF*/
+	}
 	obj->base.expected_size+=part->expected_size+strlen(obj->boundary) + 4; /* add the separator length to the body length as each part start with a separator. 4 is for "--" and "\r\n" */
 	if (part->headers != NULL) { /* there is a declared header for this part, add its length to the expected total length */
 		size_t headerStringBufferSize = DEFAULT_HEADER_STRING_SIZE;
@@ -877,24 +917,31 @@ void belle_sip_multipart_body_handler_progress_cb(belle_sip_body_handler_t *obj,
 		uint8_t *end_headers_cursor;
 		uint8_t *end_header_cursor;
 		uint8_t *cursor = obj_multipart->buffer;
-		char *boundary = belle_sip_strdup_printf("--%s", obj_multipart->boundary);
-		if (strncmp((char *)cursor, boundary, strlen(boundary))) {
+		char *dash_boundary = belle_sip_strdup_printf("--%s", obj_multipart->boundary);
+		if (strncmp((char *)cursor, dash_boundary, strlen(dash_boundary))) {
 			belle_sip_warning("belle_sip_multipart_body_handler [%p]: body not starting by specified boundary '%s'", obj_multipart, obj_multipart->boundary);
-			belle_sip_free(boundary);
+			belle_sip_free(dash_boundary);
 			return;
 		}
-		cursor += strlen(boundary);
+		cursor += strlen(dash_boundary);
 		do {
+			bool_t delimiter_contains_crlf = FALSE;
 			if (strncmp((char *)cursor, "\r\n", 2)) {
 				belle_sip_warning("belle_sip_multipart_body_handler [%p]: no new-line after boundary", obj_multipart);
+				belle_sip_free(dash_boundary);
 				return;
 			}
 			cursor += 2;
-			end_part_cursor = (uint8_t *)strstr((char *)cursor, boundary);
+			end_part_cursor = (uint8_t *)strstr((char *)cursor, dash_boundary);
 			if (end_part_cursor == NULL) {
 				belle_sip_warning("belle_sip_multipart_body_handler [%p]: cannot find next boundary", obj_multipart);
+				belle_sip_free(dash_boundary);
 				return;
 			} else {
+				if (*(end_part_cursor-1) == '\n' && *(end_part_cursor-2) == '\r') {
+					end_part_cursor-=2; /* delimiter is well formed: delimiter := CRLF dash-boundary */
+					delimiter_contains_crlf = TRUE;
+				}
 				*end_part_cursor = 0;
 				end_headers_cursor = (uint8_t *)strstr((char *)cursor, "\r\n\r\n");
 				if (end_headers_cursor == NULL) {
@@ -913,9 +960,11 @@ void belle_sip_multipart_body_handler_progress_cb(belle_sip_body_handler_t *obj,
 					} while (end_header_cursor != end_headers_cursor);
 				}
 				belle_sip_multipart_body_handler_add_part(obj_multipart, BELLE_SIP_BODY_HANDLER(memorypart));
-				cursor = end_part_cursor + strlen(boundary);
+				cursor = end_part_cursor + strlen(dash_boundary);
+				if (delimiter_contains_crlf)
+					cursor += 2;
 			}
 		} while (strcmp((char *)cursor, "--\r\n"));
-		belle_sip_free(boundary);
+		belle_sip_free(dash_boundary);
 	}
 }

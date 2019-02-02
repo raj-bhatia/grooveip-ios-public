@@ -18,7 +18,6 @@
  */
 
 #import "PhoneMainView.h"
-#import <AddressBook/ABPerson.h>
 
 @implementation ContactSelection
 
@@ -106,7 +105,9 @@ static UICompositeViewDescription *compositeDescription = nil;
 - (void)viewDidLoad {
 	[super viewDidLoad];
 	tableController.tableView.accessibilityIdentifier = @"Contacts table";
+#if 0	// Changed Linphone code - No need to make this call since it is already called during viewWillAppear
 	[self changeView:ContactsAll];
+#endif
 	/*if ([tableController totalNumberOfItems] == 0) {
 		[self changeView:ContactsAll];
 	 }*/
@@ -158,6 +159,8 @@ static UICompositeViewDescription *compositeDescription = nil;
 - (void)changeView:(ContactsCategory)view {
 	CGRect frame = _selectedButtonImage.frame;
 	if (view == ContactsAll && !allButton.selected) {
+		//REQUIRED TO RELOAD WITH FILTER
+		[LinphoneManager.instance setContactsUpdated:TRUE];
 		frame.origin.x = allButton.frame.origin.x;
 		[ContactSelection setSipFilter:nil];
 		[ContactSelection enableEmailFilter:FALSE];
@@ -165,6 +168,8 @@ static UICompositeViewDescription *compositeDescription = nil;
 		linphoneButton.selected = FALSE;
 		[tableController loadData];
 	} else if (view == ContactsLinphone && !linphoneButton.selected) {
+		//REQUIRED TO RELOAD WITH FILTER
+		[LinphoneManager.instance setContactsUpdated:TRUE];
 		frame.origin.x = linphoneButton.frame.origin.x;
 		[ContactSelection setSipFilter:LinphoneManager.instance.contactFilter];
 		[ContactSelection enableEmailFilter:FALSE];
@@ -203,6 +208,7 @@ static UICompositeViewDescription *compositeDescription = nil;
 
 - (IBAction)onDeleteClick:(id)sender {
 	NSString *msg = [NSString stringWithFormat:NSLocalizedString(@"Do you want to delete selected contacts?", nil)];
+	[LinphoneManager.instance setContactsUpdated:TRUE];
 	[UIConfirmationDialog ShowWithMessage:msg
 		cancelMessage:nil
 		confirmMessage:nil
@@ -217,13 +223,13 @@ static UICompositeViewDescription *compositeDescription = nil;
 }
 
 - (IBAction)onEditionChangeClick:(id)sender {
-	allButton.hidden = linphoneButton.hidden = _selectedButtonImage.hidden = addButton.hidden =
-		self.tableController.isEditing;
+	allButton.hidden = linphoneButton.hidden = _selectedButtonImage.hidden = addButton.hidden =	self.tableController.isEditing;
 }
 
 - (void)searchBarCancelButtonClicked:(UISearchBar *)searchBar {
 	searchBar.text = @"";
 	[self searchBar:searchBar textDidChange:@""];
+	[LinphoneManager.instance setContactsUpdated:TRUE];
 	[tableController loadData];
 	[searchBar resignFirstResponder];
 }
@@ -241,6 +247,7 @@ static UICompositeViewDescription *compositeDescription = nil;
 	// searchBar.text = [searchText uppercaseString];
 	[ContactSelection setNameOrEmailFilter:searchText];
 	if (searchText.length == 0) {
+		[LinphoneManager.instance setContactsUpdated:TRUE];
 		[tableController loadData];
 	} else {
 		[tableController loadSearchedData];

@@ -30,11 +30,10 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #include "object.hh"
 
 {{#_class}}{{#isVcard}}
-#include <belcard/belcard.hpp>
+namespace belcard {
+class BelCard;
+}
 {{/isVcard}}{{/_class}}
-{{#_class}}{{#isfactory}}
-#include "config.hh"
-{{/isfactory}}{{/_class}}
 
 
 {{#_class}}
@@ -47,23 +46,53 @@ struct {{{privCClassName}}};
 namespace linphone {
 
 	{{#priorDeclarations}}
-	class {{{name}}};
+	{{{declaration}}};
 	{{/priorDeclarations}}
 
 	{{#_class}}
-	{{#doc}}
 	/**
+	 {{#briefDoc}}
 	 {{#lines}}
 	 * {{{line}}}
 	 {{/lines}}
+	 {{/briefDoc}}
+	 *
+	 {{#detailedDoc}}
+	 {{#lines}}
+	 * {{{line}}}
+	 {{/lines}}
+	 {{/detailedDoc}}
 	 */
-	{{/doc}}
 	class {{className}}{{#parentClassName}}: public {{{parentClassName}}}{{/parentClassName}} {
 		{{#friendClasses}}
 		friend class {{name}};
 		{{/friendClasses}}
 	
 		public:
+			{{#enums}}
+			{{#doc}}
+			/**
+			{{#lines}}
+			* {{{line}}}
+			{{/lines}}
+			*
+			*/
+			{{/doc}}
+			enum class {{name}} {
+				{{#enumerators}}
+				{{#doc}}
+				/**
+				{{#lines}}
+				* {{{line}}}
+				{{/lines}}
+				*/
+				{{/doc}}
+				{{name}}{{#value}} = {{{value}}}{{/value}}{{#notLast}},{{/notLast}}
+				{{/enumerators}}
+			};
+
+			{{/enums}}
+
 			{{#isNotListener}}
 			{{#isrefcountable}}
 			{{{className}}}(void *ptr, bool takeRef=true);
@@ -89,35 +118,43 @@ namespace linphone {
 			{{/ismultilistenable}}
 	
 		public:
-			{{#isfactory}}
-			LINPHONECXX_PUBLIC std::shared_ptr<Core> createCore(const std::shared_ptr<CoreListener> &listener, const std::string & configPath, const std::string & factoryConfigPath) const;
-			LINPHONECXX_PUBLIC std::shared_ptr<Core> createCoreWithConfig(const std::shared_ptr<CoreListener> &listener, const std::shared_ptr<Config> & config) const;
-			{{/isfactory}}
 			{{#isVcard}}
 			LINPHONECXX_PUBLIC std::shared_ptr<belcard::BelCard> &getVcard();
 			{{/isVcard}}
 			
 		
 			{{#methods}}
-			{{#doc}}
 			/**
-			 {{#lines}}
+			{{#briefDoc}}
+			{{#lines}}
 			 * {{{line}}}
-			 {{/lines}}
+			{{/lines}}
+			{{/briefDoc}}
+			 *
+			{{#detailedDoc}}
+			{{#lines}}
+			 * {{{line}}}
+			{{/lines}}
+			{{/detailedDoc}}
 			 */
-			{{/doc}}
-			{{{prototype}}}
+			LINPHONECXX_PUBLIC {{#deprecated}}LINPHONECXX_DEPRECATED {{/deprecated}}{{#isListener}}virtual {{/isListener}}{{{declPrototype}}}{{{suffix}}};
 			
 			{{/methods}}
-			{{#staticMethods}}
-			{{#doc}}
+			{{#staticMethods}};
 			/**
-			 {{#lines}}
+			{{#briefDoc}}
+			{{#lines}}
 			 * {{{line}}}
-			 {{/lines}}
+			{{/lines}}
+			{{/briefDoc}}
+			 *
+			{{#detailedDoc}}
+			{{#lines}}
+			 * {{{line}}}
+			{{/lines}}
+			{{/detailedDoc}}
 			 */
-			{{/doc}}
-			{{{prototype}}}
+			LINPHONECXX_PUBLIC {{#deprecated}}LINPHONECXX_DEPRECATED {{/deprecated}}static {{{declPrototype}}};
 			
 			{{/staticMethods}}
 

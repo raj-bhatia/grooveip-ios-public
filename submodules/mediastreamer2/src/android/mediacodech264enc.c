@@ -42,7 +42,8 @@ static const MSVideoConfiguration mediaCodecH264_conf_list[] = {
 	MS_MEDIACODECH264_CONF(1024000,  	5000000,   			720P, 30,  2),
 	MS_MEDIACODECH264_CONF(750000, 	2048000,             XGA, 25,  2),
 	MS_MEDIACODECH264_CONF(500000,  	1024000,            SVGA, 15,  2),
-	MS_MEDIACODECH264_CONF(256000,  	 800000,             VGA, 15,  2),
+	MS_MEDIACODECH264_CONF(600000,      3000000,             VGA, 30,  2),
+	MS_MEDIACODECH264_CONF(400000,  	 800000,             VGA, 15,  2),
 	MS_MEDIACODECH264_CONF(128000,  	 512000,             CIF, 15,  1),
 	MS_MEDIACODECH264_CONF(100000,  	 380000,            QVGA, 15,  1),
 	MS_MEDIACODECH264_CONF(0,      170000,            QCIF, 10,  1),
@@ -179,7 +180,7 @@ static void enc_preprocess(MSFilter *f) {
 
 	enc_configure(d);
 	
-	d->packer = rfc3984_new();
+	d->packer = rfc3984_new_with_factory(f->factory);
 	rfc3984_set_mode(d->packer, d->mode);
 	rfc3984_enable_stap_a(d->packer, FALSE);
 	ms_video_starter_init(&d->starter);
@@ -249,8 +250,11 @@ static void enc_process(MSFilter *f) {
 
 			if (ms_iframe_requests_limiter_iframe_requested(&d->iframe_limiter, f->ticker->time) ||
 			        (d->avpf_enabled == FALSE && ms_video_starter_need_i_frame(&d->starter, f->ticker->time))) {
+				AMediaFormat *afmt = AMediaFormat_new();
 				/*Force a key-frame*/
-				AMediaCodec_setParams(d->codec, "request-sync");
+				AMediaFormat_setInt32(afmt, "request-sync", 0);
+				AMediaCodec_setParams(d->codec, afmt);
+				AMediaFormat_delete(afmt);
 				ms_error("MSMediaCodecH264Enc: I-frame requested to MediaCodec");
 				ms_iframe_requests_limiter_notify_iframe_sent(&d->iframe_limiter, f->ticker->time);
 			}
@@ -269,11 +273,10 @@ static void enc_process(MSFilter *f) {
 								int src_pix_strides[4] = {1, 1, 1, 1};
 								ms_yuv_buf_copy_with_pix_strides(pic.planes, pic.strides, src_pix_strides, src_roi, image.buffers, image.row_strides, image.pixel_strides, image.crop_rect);
 								bufsize = image.row_strides[0] * image.height * 3 / 2;
-								AMediaImage_close(&image);
 							} else {
 								ms_error("%s: encoder requires non YUV420 format", f->desc->name);
-								AMediaImage_close(&image);
 							}
+							AMediaImage_close(&image);
 						}
 					} else {
 						if (d->isPlanar) {
@@ -397,7 +400,17 @@ static int enc_set_configuration(MSFilter *f, void *arg) {
 	if (d->vconf.required_bitrate > d->vconf.bitrate_limit)
 		d->vconf.required_bitrate = d->vconf.bitrate_limit;
 
-	ms_message("Video configuration set: bitrate=%dbits/s, fps=%f, vsize=%dx%d", d->vconf.required_bitrate, d->vconf.fps, d->vconf.vsize.width, d->vconf.vsize.height);
+	ms_message("Video configuration set: bitrate=%d bits/s, fps=%f, vsize=%dx%d", d->vconf.required_bitrate, d->vconf.fps, d->vconf.vsize.width, d->vconf.vsize.height);
+	
+	if (d->codec_started){
+		AMediaFormat *afmt = AMediaFormat_new();
+		/*Update the output bitrate*/
+		ms_filter_lock(f);
+		AMediaFormat_setInt32(afmt, "video-bitrate", d->vconf.required_bitrate);
+		AMediaCodec_setParams(d->codec, afmt);
+		AMediaFormat_delete(afmt);
+		ms_filter_unlock(f);
+	}
 	return 0;
 }
 
@@ -408,10 +421,10 @@ static int enc_set_br(MSFilter *f, void *arg) {
 	if (d->codec_started) {
 		/* Encoding is already ongoing, do not change video size, only bitrate. */
 		d->vconf.required_bitrate = br;
-		/* TODO apply the new bitrate request to the running MediaCodec*/
+		/* apply the new bitrate request to the running MediaCodec*/
 		enc_set_configuration(f, &d->vconf);
 	} else {
-		MSVideoConfiguration best_vconf = ms_video_find_best_configuration_for_bitrate(d->vconf_list, br, ms_factory_get_cpu_count(f->factory));
+		MSVideoConfiguration best_vconf = ms_video_find_best_configuration_for_size_and_bitrate(d->vconf_list, d->vconf.vsize, ms_factory_get_cpu_count(f->factory),  br);
 		enc_set_configuration(f, &best_vconf);
 	}
 
@@ -470,6 +483,19 @@ static int enc_notify_fir(MSFilter *f, void *data) {
 	return 0;
 }
 
+static int enc_get_conf_list(MSFilter *f, void *data){
+	EncData *d = (EncData *)f->data;
+	*(MSVideoConfiguration **)data = (MSVideoConfiguration*)d->vconf_list;
+	return 0;
+}
+
+static int enc_set_conf_list(MSFilter *f, void *data){
+	EncData *d = (EncData *)f->data;
+	MSVideoConfiguration *conf_list = *(MSVideoConfiguration **)data;
+	d->vconf_list = conf_list != NULL ? conf_list : mediaCodecH264_conf_list;
+	return 0;
+}
+
 static MSFilterMethod  mediacodec_h264_enc_methods[] = {
 	{ MS_FILTER_SET_FPS,                       enc_set_fps                },
 	{ MS_FILTER_SET_BITRATE,                   enc_set_br                 },
@@ -480,6 +506,9 @@ static MSFilterMethod  mediacodec_h264_enc_methods[] = {
 	{ MS_VIDEO_ENCODER_NOTIFY_FIR,             enc_notify_fir             },
 	{ MS_FILTER_SET_VIDEO_SIZE,                enc_set_vsize              },
 	{ MS_VIDEO_ENCODER_ENABLE_AVPF,            enc_enable_avpf            },
+	{ MS_VIDEO_ENCODER_GET_CONFIGURATION_LIST, enc_get_conf_list	      },
+	{ MS_VIDEO_ENCODER_SET_CONFIGURATION_LIST, enc_set_conf_list	      },
+	{ MS_VIDEO_ENCODER_SET_CONFIGURATION,	   enc_set_configuration      },
 	{ 0,                                       NULL                       }
 };
 

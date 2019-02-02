@@ -21,7 +21,7 @@
 ############################################################################
 
 cmake_minimum_required(VERSION 3.0)
-project(msamr VERSION 1.1.2 LANGUAGES C)
+project(msamr VERSION 1.1.3 LANGUAGES C)
 
 
 set(PACKAGE "${PROJECT_NAME}")
@@ -50,8 +50,10 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 if(LINPHONE_BUILDER_GROUP_EXTERNAL_SOURCE_PATH_BUILDERS)
 	include("${EP_ortp_CONFIG_DIR}/ORTPConfig.cmake")
+	include("${EP_bctoolbox_CONFIG_DIR}/BcToolboxConfig.cmake")
 	include("${EP_ms2_CONFIG_DIR}/Mediastreamer2Config.cmake")
 else()
+	find_package(BCTOOLBOX REQUIRED)
 	find_package(ORTP REQUIRED)
 	find_package(Mediastreamer2 REQUIRED)
 endif()
@@ -92,14 +94,25 @@ endif()
 add_definitions("-DHAVE_CONFIG_H")
 if(NOT MSVC)
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wno-error=unknown-pragmas")
-	if("${CMAKE_C_COMPILER_ID}" STREQUAL "Clang")
+	if(CMAKE_C_COMPILER_ID MATCHES "Clang")
 		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error=unknown-warning-option")
 		if(NOT IOS)
 			set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror -Wextra -Wno-unused-parameter")
 		endif()
-	elseif("${CMAKE_C_COMPILER_ID}" STREQUAL "GNU")
+	elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU")
 		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror -Wextra -Wno-unused-parameter -Wno-error=pragmas")
 	endif()
 endif()
 
 add_subdirectory(src)
+
+
+# CPack settings
+set(CPACK_SOURCE_GENERATOR "TGZ")
+set(CPACK_SOURCE_PACKAGE_FILE_NAME "${PROJECT_NAME}-${PROJECT_VERSION}")
+set(CPACK_SOURCE_IGNORE_FILES
+	"^${CMAKE_BINARY_DIR}"
+	"/\\\\..+"
+)
+
+include(CPack)

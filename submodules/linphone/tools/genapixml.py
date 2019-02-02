@@ -17,13 +17,18 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 import argparse
+import logging
 import os
 import six
 import string
 import sys
 import xml.etree.ElementTree as ET
 import xml.dom.minidom as minidom
+
 import metadoc
+
+
+logger = logging.getLogger(__name__)
 
 
 class CObject:
@@ -33,6 +38,7 @@ class CObject:
 		self.detailedDescription = None
 		self.deprecated = False
 		self.briefDoc = None
+		self.detailedDoc = None
 
 
 class CEnumValue(CObject):
@@ -46,6 +52,10 @@ class CEnum(CObject):
 		CObject.__init__(self, name)
 		self.values = []
 		self.associatedTypedef = None
+	
+	@property
+	def publicName(self):
+		return self.associatedTypedef.name if self.associatedTypedef is not None else self.name
 
 	def addValue(self, value):
 		self.values.append(value)
@@ -238,7 +248,6 @@ class CClass(CObject):
 
 class Project:
 	def __init__(self):
-		self.verbose = False
 		self.prettyPrint = False
 		self.enums = []
 		self.__structs = []
@@ -250,37 +259,28 @@ class Project:
 
 	def add(self, elem):
 		if isinstance(elem, CClass):
-			if self.verbose:
-				print("Adding class " + elem.name)
+			logger.debug("Adding class " + elem.name)
 			self.classes.append(elem)
 		elif isinstance(elem, CEnum):
-			if self.verbose:
-				print("Adding enum " + elem.name)
-				for ev in elem.values:
-					print("\t" + ev.name)
+			msg = 'Adding enum {0}'.format(elem.name)
+			for value in elem.values:
+				msg += ('\t{0}'.format(value))
+			logger.debug(msg)
 			self.enums.append(elem)
 		elif isinstance(elem, CStruct):
-			if self.verbose:
-				print("Adding struct " + elem.name)
-				for sm in elem.members:
-					print("\t" + sm.ctype + " " + sm.name)
+			msg = "Adding struct " + elem.name
+			for sm in elem.members:
+				msg += ('\t{0} {1}'.format(sm.ctype, sm.name))
+			logger.debug(msg)
 			self.__structs.append(elem)
 		elif isinstance(elem, CTypedef):
-			if self.verbose:
-				print("Adding typedef " + elem.name)
-				print("\t" + elem.definition)
+			logger.debug('Adding typedef {0}\t{1}'.format(elem.name, elem.definition))
 			self.__typedefs.append(elem)
 		elif isinstance(elem, CEvent):
-			if self.verbose:
-				print("Adding event " + elem.name)
-				print("\tReturns: " + elem.returnArgument.ctype)
-				print("\tArguments: " + str(elem.arguments))
+			logger.debug('Adding event {0}\tReturns: {1}\tArguments: {2}'.format(elem.name, elem.returnArgument.ctype, elem.arguments))
 			self.__events.append(elem)
 		elif isinstance(elem, CFunction):
-			if self.verbose:
-				print("Adding function " + elem.name)
-				print("\tReturns: " + elem.returnArgument.ctype)
-				print("\tArguments: " + str(elem.arguments))
+			logger.debug('Adding event {0}\tReturns: {1}\tArguments: {2}'.format(elem.name, elem.returnArgument.ctype, elem.arguments))
 			self.__functions.append(elem)
 
 	def __cleanDescription(self, descriptionNode):
@@ -329,7 +329,7 @@ class Project:
 						break
 				if not structFound:
 					name = td.definition[7:]
-					print("Structure with no associated typedef: " + name)
+					logger.warning("Structure with no associated typedef: " + name)
 					st = CStruct(name)
 					st.associatedTypedef = td
 					self.add(st)
@@ -339,6 +339,7 @@ class Project:
 					if st.associatedTypedef == td:
 						cclass = CClass(st)
 						cclass.briefDoc = td.briefDoc
+						cclass.detailedDoc = td.detailedDoc
 						self.add(cclass)
 						break
 			elif ('Linphone' + td.definition) == td.name:
@@ -346,6 +347,7 @@ class Project:
 				st.associatedTypedef = td
 				cclass = CClass(st)
 				cclass.briefDoc = td.briefDoc
+				cclass.detailedDoc = td.detailedDoc
 				self.add(st)
 				self.add(cclass)
 		# Sort classes by length of name (longest first), so that methods are put in the right class
@@ -389,6 +391,7 @@ class Project:
 			ev.deprecated = True
 		ev.briefDescription = ''.join(node.find('./briefdescription').itertext()).strip()
 		ev.briefDoc = self.docparser.parse_description(node.find('./briefdescription'))
+		ev.detailedDoc = self.docparser.parse_description(node.find('./detaileddescription'))
 		ev.detailedDescription = self.__cleanDescription(node.find('./detaileddescription'))
 		return ev
 
@@ -401,6 +404,7 @@ class Project:
 			e.deprecated = True
 		e.briefDescription = ''.join(node.find('./briefdescription').itertext()).strip()
 		e.briefDoc = self.docparser.parse_description(node.find('./briefdescription'))
+		e.detailedDoc = self.docparser.parse_description(node.find('./detaileddescription'))
 		e.detailedDescription = self.__cleanDescription(node.find('./detaileddescription'))
 		enumvalues = node.findall("enumvalue[@prot='public']")
 		for enumvalue in enumvalues:
@@ -424,6 +428,7 @@ class Project:
 			sm.deprecated = True
 		sm.briefDescription = ''.join(node.find('./briefdescription').itertext()).strip()
 		sm.briefDoc = self.docparser.parse_description(node.find('./briefdescription'))
+		sm.detailedDoc = self.docparser.parse_description(node.find('./detaileddescription'))
 		sm.detailedDescription = self.__cleanDescription(node.find('./detaileddescription'))
 		return sm
 
@@ -434,6 +439,7 @@ class Project:
 			s.deprecated = True
 		s.briefDescription = ''.join(node.find('./briefdescription').itertext()).strip()
 		s.briefDoc = self.docparser.parse_description(node.find('./briefdescription'))
+		s.detailedDoc = self.docparser.parse_description(node.find('./detaileddescription'))
 		s.detailedDescription = self.__cleanDescription(node.find('./detaileddescription'))
 		structmembers = node.findall("sectiondef/memberdef[@kind='variable'][@prot='public']")
 		for structmember in structmembers:
@@ -454,6 +460,8 @@ class Project:
 		definition = node.find('./definition').text
 		if definition.startswith('typedef '):
 			definition = definition[8 :]
+		briefDoc = self.docparser.parse_description(node.find('./briefdescription'))
+		detailedDoc = self.docparser.parse_description(node.find('./detaileddescription'))
 		if name.endswith('Cb'):
 			pos = definition.find("(*")
 			if pos == -1:
@@ -483,7 +491,14 @@ class Project:
 				elif spacePos != -1:
 					argType = argdef[0 : spacePos]
 					argName = argdef[spacePos + 1 :]
-				argslist.addArgument(CArgument(argType, argName, self.enums, self.__structs))
+				arg = CArgument(argType, argName, self.enums, self.__structs)
+				if arg.ctype == 'MSList' or arg.ctype == 'bctbx_list_t':
+					for argentry in node.findall("detaileddescription/para/parameterlist[@kind='param']/*"):
+						if argentry.find("parameternamelist[parametername='{0}']".format(argName)) is not None:
+							containedType = argentry.find("parameterdescription//bctbxlist")
+							arg.containedType = containedType.text if containedType is not None else None
+							break
+				argslist.addArgument(arg)
 			if len(argslist) > 0:
 				paramdescs = node.findall("detaileddescription/para/parameterlist[@kind='param']/parameteritem")
 				if paramdescs:
@@ -496,14 +511,15 @@ class Project:
 						if arg.description == None:
 							missingDocWarning += "\t'" + arg.name + "' parameter not documented\n";
 					if missingDocWarning != '':
-						print(name + ":\n" + missingDocWarning)
+						logger.warning(name + ":\n" + missingDocWarning)
 			f = CEvent(name, returnarg, argslist)
 			deprecatedNode = node.find(".//xrefsect[xreftitle='Deprecated']")
 			if deprecatedNode is not None:
 				f.deprecated = True
 			f.briefDescription = ''.join(node.find('./briefdescription').itertext()).strip()
-			f.briefDoc = self.docparser.parse_description(node.find('./briefdescription'))
+			f.briefDoc = briefDoc
 			f.detailedDescription = self.__cleanDescription(node.find('./detaileddescription'))
+			f.detailedDoc = detailedDoc
 			return f
 		else:
 			pos = definition.rfind(" " + name)
@@ -514,8 +530,9 @@ class Project:
 			if deprecatedNode is not None:
 				td.deprecated = True
 			td.briefDescription = ''.join(node.find('./briefdescription').itertext()).strip()
-			td.briefDoc = self.docparser.parse_description(node.find('./briefdescription'))
+			td.briefDoc = briefDoc
 			td.detailedDescription = self.__cleanDescription(node.find('./detaileddescription'))
+			td.detailedDoc = detailedDoc
 			return td
 		return None
 
@@ -531,6 +548,11 @@ class Project:
 		internal = node.find("./detaileddescription/internal")
 		if internal is not None:
 			return None
+		
+		# The doc must be parsed here since the XML tree is to be modified in below code
+		briefDoc = self.docparser.parse_description(node.find('./briefdescription'))
+		detailedDoc = self.docparser.parse_description(node.find('./detaileddescription'))
+		
 		missingDocWarning = ''
 		name = node.find('./name').text
 		t = ''.join(node.find('./type').itertext())
@@ -574,17 +596,18 @@ class Project:
 		if deprecatedNode is not None:
 			f.deprecated = True
 		f.briefDescription = ''.join(node.find('./briefdescription').itertext()).strip()
-		f.briefDoc = self.docparser.parse_description(node.find('./briefdescription'))
 		f.detailedDescription = self.__cleanDescription(node.find('./detaileddescription'))
 		if f.briefDescription == '' and ''.join(f.detailedDescription.itertext()).strip() == '':
 			return None
+		f.briefDoc = briefDoc
+		f.detailedDoc = detailedDoc
 		locationNode = node.find('./location')
 		if locationNode is not None:
 			f.location = locationNode.get('file')
 			if not f.location.endswith('.h'):
 				missingDocWarning += "\tNot documented in a header file ('" + f.location + "')\n";
 		if missingDocWarning != '':
-			print(name + ":\n" + missingDocWarning)
+			logger.warning(name + ":\n" + missingDocWarning)
 		return f
 
 	def __findCFunction(self, tree):
@@ -599,11 +622,10 @@ class Project:
 		for f in xmlfiles:
 			tree = None
 			try:
-				if self.verbose:
-					print("Parsing XML file: " + f.name)
+				logger.debug("Parsing XML file: " + f)
 				tree = ET.parse(f)
 			except ET.ParseError as e:
-				print(e)
+				logger.error(e)
 			if tree is not None:
 				trees.append(tree)
 		for tree in trees:
@@ -624,7 +646,7 @@ class Project:
 		for c in self.classes:
 			for name, p in six.iteritems(c.properties):
 				if p.getter is None and p.setter is not None:
-					print("Property '" + name + "' of class '" + c.name + "' has a setter but no getter")
+					logger.warning("Property '" + name + "' of class '" + c.name + "' has a setter but no getter")
 
 
 class Generator:
@@ -749,7 +771,7 @@ class Generator:
 		classNode.append(cclass.detailedDescription)
 
 	def generate(self, project):
-		print("Generating XML document of Linphone API to '" + self.__outputfile.name + "'")
+		logger.info("Generating XML document of Linphone API to '" + self.__outputfile.name + "'")
 		apiNode = ET.Element('api')
 		project.enums.sort(key = lambda e: e.name)
 		if len(project.enums) > 0:
@@ -782,7 +804,9 @@ def main(argv = None):
 		args.outputfile = open('api.xml', 'w')
 	project = Project()
 	if args.verbose:
-		project.verbose = True
+		logger.setLogLevel(logging.DEBUG)
+	else:
+		logger.setLogLevel(logging.INFO)
 	if args.pretty:
 		project.prettyPrint = True
 	project.initFromDir(args.xmldir)

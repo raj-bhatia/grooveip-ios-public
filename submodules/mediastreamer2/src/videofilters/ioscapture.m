@@ -68,6 +68,9 @@ static AVCaptureVideoOrientation Angle2AVCaptureVideoOrientation(int deviceOrien
 	char fps_context[64];
 	const char *deviceId;
 	MSYuvBufAllocator* bufAllocator;
+	MSFilter *filter;
+	MSFrameRateController framerate_controller;
+	bool_t filterIsRunning;
 };
 
 - (void)initIOSCapture;
@@ -110,11 +113,12 @@ static void capture_queue_cleanup(void* p) {
 	return self;
 }
 
-- (id)initWithFrame:(CGRect)frame {
+- (id)initWithFrame:(CGRect)frame andFilter:(MSFilter *)f {
 	self = [super initWithFrame:frame];
 	if (self) {
 		[self initIOSCapture];
 	}
+	filter = f;
 	return self;
 }
 
@@ -165,6 +169,14 @@ static void capture_queue_cleanup(void* p) {
 	CVImageBufferRef frame = nil;
 	@synchronized(self) {
 		@try {
+			ms_mutex_lock(&mutex);
+			if (!filterIsRunning || !ms_video_capture_new_frame(&framerate_controller, filter->ticker->time)) {
+				ms_mutex_unlock(&mutex);
+				return;
+			}
+			ms_mutex_unlock(&mutex);
+
+
 			frame = CMSampleBufferGetImageBuffer(sampleBuffer);
 			CVReturn status = CVPixelBufferLockBaseAddress(frame, 0);
 			if (kCVReturnSuccess != status) {
@@ -351,6 +363,7 @@ static void capture_queue_cleanup(void* p) {
 
 			[session startRunning]; //warning can take around 1s before returning
 			snprintf(fps_context, sizeof(fps_context), "Captured mean fps=%%f, expected=%f", fps);
+			ms_video_init_framerate_controller(&framerate_controller, fps);
 			ms_video_init_average_fps(&averageFps, fps_context);
 
 			ms_message("ioscapture video device started.");
@@ -396,8 +409,7 @@ static AVCaptureVideoOrientation Angle2AVCaptureVideoOrientation(int deviceOrien
 		|| ((outputSize.width * outputSize.height) == (MS_VIDEO_SIZE_720P_W * MS_VIDEO_SIZE_720P_H))) {
 		[session setSessionPreset: AVCaptureSessionPreset1280x720];
 		mCameraVideoSize = outputSize;
-		// Force 4/3 ratio
-		mOutputVideoSize.width = (outputSize.width / 4) * 3;
+		mOutputVideoSize.width = outputSize.width;
 		mOutputVideoSize.height = outputSize.height;
 		mDownScalingRequired = false;
 	} else if ((outputSize.width * outputSize.height) == (MS_VIDEO_SIZE_VGA_W * MS_VIDEO_SIZE_VGA_H)) {
@@ -417,9 +429,9 @@ static AVCaptureVideoOrientation Angle2AVCaptureVideoOrientation(int deviceOrien
         mDownScalingRequired = FALSE;
 	} else if ( (outputSize.width * outputSize.height) == (MS_VIDEO_SIZE_QCIF_W * MS_VIDEO_SIZE_QCIF_H) ){
 		[session setSessionPreset:AVCaptureSessionPreset352x288];
-        mCameraVideoSize     = MS_VIDEO_SIZE_CIF;
-        mOutputVideoSize     = MS_VIDEO_SIZE_QCIF;
-        mDownScalingRequired = TRUE;
+		mCameraVideoSize     = MS_VIDEO_SIZE_CIF;
+		mOutputVideoSize     = MS_VIDEO_SIZE_QCIF;
+		mDownScalingRequired = TRUE;
 	} else {
 		// Default case
 		[session setSessionPreset: AVCaptureSessionPresetMedium];
@@ -525,6 +537,7 @@ static AVCaptureVideoOrientation Angle2AVCaptureVideoOrientation(int deviceOrien
 
 		fps=value;
 		snprintf(fps_context, sizeof(fps_context), "Captured mean fps=%%f, expected=%f", fps);
+		ms_video_init_framerate_controller(&framerate_controller, fps);
 		ms_video_init_average_fps(&averageFps, fps_context);
 		[session commitConfiguration];
 	}
@@ -562,7 +575,7 @@ static AVCaptureVideoOrientation Angle2AVCaptureVideoOrientation(int deviceOrien
 
 static void ioscapture_init(MSFilter *f) {
 	NSAutoreleasePool* myPool = [[NSAutoreleasePool alloc] init];
-	f->data = [[IOSCapture alloc] initWithFrame:CGRectMake(0, 0, 0, 0)];
+	f->data = [[IOSCapture alloc] initWithFrame:CGRectMake(0, 0, 0, 0) andFilter:f];
 	[myPool drain];
 }
 
@@ -601,10 +614,20 @@ static void ioscapture_preprocess(MSFilter *f) {
 		NSAutoreleasePool* myPool = [[NSAutoreleasePool alloc] init];
 		[thiz performSelectorInBackground:@selector(start) withObject:nil];
 		[myPool drain];
+
+		ms_mutex_lock(&thiz->mutex);
+		thiz->filterIsRunning = 1;
+		ms_mutex_unlock(&thiz->mutex);
 	}
 }
 
 static void ioscapture_postprocess(MSFilter *f) {
+	IOSCapture *thiz = (IOSCapture*)f->data;
+	if (thiz != NULL) {
+		ms_mutex_lock(&thiz->mutex);
+		thiz->filterIsRunning = 0;
+		ms_mutex_unlock(&thiz->mutex);
+	}
 }
 
 static int ioscapture_get_fps(MSFilter *f, void *arg) {

@@ -1,19 +1,19 @@
 /*
 	belle-sip - SIP (RFC3261) library.
-    Copyright (C) 2010  Belledonne Communications SARL
+	Copyright (C) 2010-2018  Belledonne Communications SARL
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 2 of the License, or
+	(at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "belle-sip/sip-uri.h"
@@ -244,7 +244,7 @@ static int uri_strcmp(const char*a,const char*b,int case_sensitive) {
 	int result = 0;
 	size_t index_a=0,index_b=0;
 	char char_a,char_b;
-	
+
 	if (a == NULL && b == NULL) {
 		goto end;
 	}
@@ -302,7 +302,7 @@ int belle_sip_uri_equals(const belle_sip_uri_t* uri_a,const belle_sip_uri_t* uri
          defined otherwise.
 */
 	if (!IS_EQUAL(uri_a->user,uri_b->user)) return 0;
-	
+
 /*
       o  The ordering of parameters and header fields is not significant
          in comparing SIP and SIPS URIs.
@@ -442,10 +442,11 @@ typedef struct uri_components {
 } uri_components_t;
 
 
-/*belle sip allows contact header without host because stack will auutomatically put host if missing*/
+/*belle sip allows contact header without host because stack will automatically put host if missing*/
 static  uri_components_t uri_component_use_for_request = 			{"Req.-URI"					,o	,o	,m	,o	,o	,na	,o	,o	,o	,o	,o	,na};
 static  uri_components_t uri_component_use_for_header_to = 			{"Header To"				,o	,o	,m	,na	,o	,na	,na	,na	,na	,na	,o	,na};
 static  uri_components_t uri_component_use_for_header_from = 		{"Header From"				,o	,o	,m	,na	,o	,na	,na	,na	,na	,na	,o	,na};
+static  uri_components_t uri_component_use_for_header_refer_to =	{"Header Refer-To"			,o	,o	,o	,o	,o	,o	,o	,o	,o	,o	,o	,o};
 static  uri_components_t uri_component_use_for_contact_in_reg =		{"Contact in REG"			,o	,o	,/*m*/o	,o	,o	,na	,o	,o	,o	,na	,o	,o};
 static  uri_components_t uri_component_use_for_dialog_ct_rr_ro =	{"Dialog Contact/R-R/Route"	,o	,o	,/*m*/o	,o	,o	,na	,o	,na	,o	,o	,o	,na};
 static  uri_components_t uri_component_use_for_external =			{"External"					,o	,o	,m	,o	,o	,o	,o	,o	,o	,o	,o	,o};
@@ -496,6 +497,8 @@ int belle_sip_uri_check_components_from_context(const belle_sip_uri_t* uri,const
 				|| strcasecmp(BELLE_SIP_RECORD_ROUTE,header_name)==0
 				|| strcasecmp(BELLE_SIP_ROUTE,header_name)==0)
 		return check_uri_components(uri,&uri_component_use_for_dialog_ct_rr_ro);
+	else if (strcasecmp(BELLE_SIP_REFER_TO, header_name) == 0)
+		return check_uri_components(uri, &uri_component_use_for_header_refer_to);
 	else
 		return check_uri_components(uri,&uri_component_use_for_external);
 

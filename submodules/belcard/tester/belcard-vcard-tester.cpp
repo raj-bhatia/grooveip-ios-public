@@ -17,6 +17,7 @@
 */
 
 
+#include <belr/belr.h>
 #include "belcard/belcard.hpp"
 #include "belcard/belcard_parser.hpp"
 #include "belcard/belcard_utils.hpp"
@@ -29,6 +30,7 @@
 #include <string>
 
 using namespace::std;
+using namespace::belr;
 using namespace::belcard;
 
 static string openFile(const char *name) {
@@ -93,7 +95,7 @@ static void create_vcard_from_api(void) {
 	belCard->setFullName(fn);
 	BC_ASSERT_TRUE(belCard->assertRFCCompliance());
 	BC_ASSERT_STRING_EQUAL(belCard->getFullName()->toString().c_str(), fn->toString().c_str());
-	
+
 	fn = BelCard::create<BelCardFullName>();
 	fn->setValue("Belcard Tester");
 	belCard->setFullName(fn);
@@ -126,10 +128,10 @@ static void property_sort_using_pref_param(void) {
 	BC_ASSERT_EQUAL((unsigned int)imppList.size(), 2, unsigned int, "%u");
 	BC_ASSERT_TRUE(imppList.front() == impp2);
 	BC_ASSERT_TRUE(imppList.back() == impp1);
-	
+
 	const list<shared_ptr<BelCardProperty>> propertiesList = belCard->getProperties();
 	BC_ASSERT_EQUAL((unsigned int)propertiesList.size(), 2, unsigned int, "%u");
-	
+
 	belCard->removeImpp(impp1);
 	BC_ASSERT_EQUAL((unsigned int)belCard->getImpp().size(), 1, unsigned int, "%u");
 	BC_ASSERT_EQUAL((unsigned int)belCard->getProperties().size(), 1, unsigned int, "%u");

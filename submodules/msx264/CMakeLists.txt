@@ -21,7 +21,7 @@
 ############################################################################
 
 cmake_minimum_required(VERSION 3.0)
-project(msx264 VERSION 1.5.3 LANGUAGES C CXX)
+project(msx264 VERSION 1.5.4 LANGUAGES C CXX)
 
 
 set(PACKAGE "${PROJECT_NAME}")
@@ -69,7 +69,7 @@ include_directories(
 add_definitions(-DHAVE_CONFIG_H)
 if(NOT MSVC)
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wno-error=unknown-pragmas")
-	if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+	if(CMAKE_C_COMPILER_ID MATCHES "Clang")
 		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error=unknown-warning-option")
 		if(NOT IOS)
 			set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror -Wextra")

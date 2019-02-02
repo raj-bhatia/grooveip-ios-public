@@ -22,6 +22,7 @@
 #import "LinphoneAppDelegate.h"
 #import "PhoneMainView.h"
 #import "Utils.h"
+#import "LoginView.h"
 
 #import "DCRoundSwitch.h"
 
@@ -506,11 +507,6 @@ void update_hash_cbs(LinphoneAccountCreator *creator, LinphoneAccountCreatorStat
 		removeFromHiddenKeys = [video_preset isEqualToString:@"custom"];
 		[keys addObject:@"video_preferred_fps_preference"];
 		[keys addObject:@"download_bandwidth_preference"];
-	} else if ([notif.object isEqualToString:@"show_msg_in_notif"]) {
-		// we have to register again to the iOS notification, because we change the actions associated with IM_MSG
-		UIApplication *app = [UIApplication sharedApplication];
-		LinphoneAppDelegate *delegate = (LinphoneAppDelegate *)app.delegate;
-		[delegate registerForNotifications:app];
 	}
 
 	for (NSString *key in keys) {
@@ -760,13 +756,15 @@ void update_hash_cbs(LinphoneAccountCreator *creator, LinphoneAccountCreatorStat
 	} else if ([key isEqual:@"flush_images_button"]) {
 		const MSList *rooms = linphone_core_get_chat_rooms(LC);
 		while (rooms) {
-			const MSList *messages = linphone_chat_room_get_history(rooms->data, 0);
-			while (messages) {
-				LinphoneChatMessage *msg = messages->data;
+			const MSList *events = linphone_chat_room_get_history_message_events(rooms->data, 0);
+			while (events) {
+				LinphoneEventLog *event = events->data;
+				LinphoneChatMessage *msg = linphone_event_log_get_chat_message(event);
 				if (!linphone_chat_message_is_outgoing(msg)) {
-					[LinphoneManager setValueInMessageAppData:nil forKey:@"localimage" inMessage:messages->data];
+					[LinphoneManager setValueInMessageAppData:nil forKey:@"localimage" inMessage:msg];
+					[LinphoneManager setValueInMessageAppData:nil forKey:@"uploadQuality" inMessage:msg];
 				}
-				messages = messages->next;
+				events = events->next;
 			}
 			rooms = rooms->next;
 		}
@@ -796,7 +794,7 @@ void update_hash_cbs(LinphoneAccountCreator *creator, LinphoneAccountCreatorStat
 																   [self recomputeAccountLabelsAndSync];
 																   [_settingsController.navigationController popViewControllerAnimated:NO];
 #else
-																   [PhoneMainView.instance changeCurrentView:FirstLoginView.compositeViewDescription];
+																   [PhoneMainView.instance changeCurrentView:LoginView.compositeViewDescription];
 #endif
 															   }];
 		

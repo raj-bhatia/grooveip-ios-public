@@ -22,7 +22,7 @@
 ############################################################################
 
 cmake_minimum_required(VERSION 3.0)
-project(BELCARD VERSION 1.0.1 LANGUAGES C CXX)
+project(BELCARD VERSION 1.0.2 LANGUAGES C CXX)
 
 set(BELCARD_SO_VERSION "1")
 
@@ -100,7 +100,7 @@ else()
 	list(APPEND STRICT_OPTIONS_CXX "-std=c++11")
 	list(APPEND STRICT_OPTIONS_CPP "-Wall" "-Wuninitialized" "-Wno-error=deprecated-declarations")
 	list(APPEND STRICT_OPTIONS_C "-Wdeclaration-after-statement" "-Wstrict-prototypes" "-Wno-error=strict-prototypes")
-	if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+	if(CMAKE_C_COMPILER_ID MATCHES "Clang")
 		list(APPEND STRICT_OPTIONS_CPP "-Qunused-arguments" "-Wno-array-bounds")
 	endif()
 	if(APPLE)
@@ -152,14 +152,4 @@ install(FILES
 )
 
 
-# CPack settings
-set(CPACK_PACKAGE_NAME "belcard")
-set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
-set(CPACK_SOURCE_GENERATOR "TGZ")
-set(CPACK_SOURCE_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}")
-set(CPACK_SOURCE_IGNORE_FILES
-        "^${CMAKE_BINARY_DIR}"
-        "/\\\\..+"
-)
-
-include(CPack)
+add_subdirectory(build)

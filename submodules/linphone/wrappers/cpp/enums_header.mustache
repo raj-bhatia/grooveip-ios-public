@@ -30,8 +30,8 @@ namespace linphone {
 	 * 
 	 */
 	{{/doc}}
-	enum {{name}} {
-		{{#values}}
+	enum class {{name}} {
+		{{#enumerators}}
 		{{#doc}}
 		/**
 		{{#lines}}
@@ -40,7 +40,7 @@ namespace linphone {
 		 */
 		{{/doc}}
 		{{name}}{{#value}} = {{{value}}}{{/value}}{{#notLast}},{{/notLast}}
-		{{/values}}
+		{{/enumerators}}
 	};
 
 	{{/enums}}

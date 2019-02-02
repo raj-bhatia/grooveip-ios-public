@@ -28,16 +28,21 @@
 @property(readonly, nonatomic) NSMutableDictionary *addressBookMap;
 @property BOOL needToUpdate;
 
-- (void)reload;
-- (void)saveAddressBook;
-- (int)removeContact:(Contact *)contact;
+- (void) fetchContactsInBackGroundThread;
+- (BOOL)deleteContact:(Contact *)contact;
+- (BOOL)deleteCNContact:(CNContact *)CNContact;
+- (BOOL)deleteAllContacts;
 - (BOOL)saveContact:(Contact *)contact;
+- (BOOL)saveCNContact:(CNContact *)CNContact contact:(Contact *)Contact;
+- (void)saveContactWithoutReload:(Contact *)contact;
 
 + (BOOL)isAuthorized;
 
 // TOOLS
 
++ (Contact *)getContact:(NSString *)address;
 + (Contact *)getContactWithAddress:(const LinphoneAddress *)address;
+- (CNContact *)getCNContactFromContact:(Contact *)acontact;
 
 + (UIImage *)imageForContact:(Contact *)contact;
 + (UIImage *)imageForAddress:(const LinphoneAddress *)addr;
@@ -48,9 +53,11 @@
 + (NSString *)displayNameForContact:(Contact *)person;
 + (NSString *)displayNameForAddress:(const LinphoneAddress *)addr;
 
-+ (BOOL)isSipURI:(NSString *)address;						  // should be removed
-+ (NSString *)normalizeSipURI:(NSString *)address;			  // should be removed
++ (BOOL)isSipURI:(NSString *)address;
++ (BOOL)isSipAddress:(CNLabeledValue<CNInstantMessageAddress *> *)sipAddr;
++ (NSString *)normalizeSipURI:(NSString *)address;
 
 + (NSString *)localizedLabel:(NSString *)label;
+- (void)registerAddrsFor:(Contact *)contact;
 
 @end

@@ -61,6 +61,7 @@ set(SCENARIO_FILES
 	scenarios/firstvalid.pcapng
 	scenarios/opus-edge-congestion20_60_40.pcapng
 	scenarios/h264_one_nalu_per_frame.pcap
+	scenarios/h264_one_nalu_per_frame_with_corrupted_idr.pcap
 	scenarios/poor_jitter_quality_22_filter.pcapng
 	scenarios/rtp-120late-1000total.pcapng
 	scenarios/rtp-240late-2000total.pcapng
@@ -91,6 +92,10 @@ set(SOURCE_FILES_C
 )
 set(SOURCE_FILES_OBJC )
 
+add_definitions(
+	-DBCTBX_LOG_DOMAIN="mediastreamer"
+)
+
 if(ENABLE_VIDEO)
 	list(APPEND SOURCE_FILES_C mediastreamer2_video_stream_tester.c)
 	if(ENABLE_PCAP)
@@ -111,15 +116,15 @@ bc_apply_compile_flags(SOURCE_FILES_OBJC STRICT_OPTIONS_CPP STRICT_OPTIONS_OBJC)
 if(CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
 
 	add_library(mediastreamer2_tester_static STATIC ${SOURCE_FILES_C})
-	target_include_directories(mediastreamer2_tester_static PUBLIC ${BCTOOLBOX_TESTER_INCLUDE_DIRS})
-	target_link_libraries(mediastreamer2_tester_static ${MS2_LIBS_FOR_TESTER} ${BCTOOLBOX_TESTER_LIBRARIES})
+	target_include_directories(mediastreamer2_tester_static PUBLIC ${BCTOOLBOX_INCLUDE_DIRS} ${ORTP_INCLUDE_DIRS})
+	target_link_libraries(mediastreamer2_tester_static ${MS2_LIBS_FOR_TESTER} ${BCTOOLBOX_LIBRARIES} ${ORTP_LIBRARIES})
 
 	set(RUNTIME_COMPONENT_SOURCES
 		mediastreamer2_tester_windows.cpp
 		mediastreamer2_tester_windows.h
 	)
 	add_library(mediastreamer2_tester_runtime MODULE ${RUNTIME_COMPONENT_SOURCES})
-	target_include_directories(mediastreamer2_tester_runtime PRIVATE "../../../mswinrtvid")	# HACK!!
+	target_include_directories(mediastreamer2_tester_runtime PRIVATE "../../mswinrtvid")	# HACK!!
 	target_link_libraries(mediastreamer2_tester_runtime mediastreamer2_tester_static)
 	set_target_properties(mediastreamer2_tester_runtime PROPERTIES VS_WINRT_COMPONENT TRUE)
 	set_target_properties(mediastreamer2_tester_runtime PROPERTIES LIBRARY_OUTPUT_NAME "BelledonneCommunications.Mediastreamer2.Tester")

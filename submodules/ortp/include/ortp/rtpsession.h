@@ -102,6 +102,9 @@ typedef struct _JitterControl
 	uint32_t last_log_ts;
 	uint32_t local_ts_start;
 	uint32_t remote_ts_start;
+	uint32_t diverged_start_ts;
+	bool_t is_diverging;
+	bool_t pad[3];
 } JitterControl;
 
 typedef struct _WaitPoint
@@ -241,6 +244,7 @@ typedef enum {
 } OrtpRtcpXrRcvrRttMode;
 
 typedef enum {
+	OrtpRtcpXrStatSummaryNone = 0,
 	OrtpRtcpXrStatSummaryLoss = (1 << 7),
 	OrtpRtcpXrStatSummaryDup = (1 << 6),
 	OrtpRtcpXrStatSummaryJitt = (1 << 5),
@@ -302,6 +306,7 @@ typedef struct _OrtpStream {
 	socklen_t loc_addrlen;
 	struct sockaddr_storage loc_addr;
 	struct _RtpTransport *tr;
+	OrtpBwEstimator recv_bw_estimator;
 	struct timeval send_bw_start; /* used for bandwidth estimation */
 	struct timeval recv_bw_start; /* used for bandwidth estimation */
 	unsigned int sent_bytes; /* used for bandwidth estimation */
@@ -351,6 +356,12 @@ typedef struct _RtpStream
 	int ssrc_changed_thres;
 	jitter_stats_t jitter_stats;
 	struct _OrtpCongestionDetector *congdetect;
+	struct _OrtpVideoBandwidthEstimator *video_bw_estimator;
+	ortp_thread_t win_t;
+	volatile bool_t is_win_thread_running;
+	ortp_mutex_t winthread_lock;
+	queue_t winrq;
+	ortp_mutex_t winrq_lock;
 }RtpStream;
 
 typedef struct _RtcpStream
@@ -444,7 +455,18 @@ struct _RtpSession
 
 	bool_t is_spliced;
 	bool_t congestion_detector_enabled;
+	bool_t video_bandwidth_estimator_enabled;
 };
+
+/**
+ * Structure describing the video bandwidth estimator parameters
+**/
+typedef struct _OrtpVideoBandwidthEstimatorParams {
+	int enabled; /**<Whether estimator is enabled or off.*/
+	unsigned int packet_count_min; /** minimum number of packets with the same sent timestamp to be processed continuously before being used */
+	unsigned int packets_size_max; /** number of packets needed to compute the available video bandwidth */
+	unsigned int trust_percentage; /** percentage for which the chosen bandwidth value in all available will be inferior */
+} OrtpVideoBandwidthEstimatorParams;
 
 
 
@@ -598,6 +620,9 @@ ORTP_PUBLIC int rtp_session_recvfrom(RtpSession *session, bool_t is_rtp, mblk_t 
 ORTP_PUBLIC int rtp_session_recv_with_ts(RtpSession *session, uint8_t *buffer, int len, uint32_t ts, int *have_more);
 ORTP_PUBLIC int rtp_session_send_with_ts(RtpSession *session, const uint8_t *buffer, int len, uint32_t userts);
 
+/* Specific function called to reset the winrq queue and if called on windows to stop the async reception thread */
+ORTP_PUBLIC void rtp_session_reset_recvfrom(RtpSession *session);
+
 /* event API*/
 ORTP_PUBLIC void rtp_session_register_event_queue(RtpSession *session, OrtpEvQueue *q);
 ORTP_PUBLIC void rtp_session_unregister_event_queue(RtpSession *session, OrtpEvQueue *q);
@@ -682,6 +707,7 @@ ORTP_PUBLIC float rtp_session_get_round_trip_propagation(RtpSession *session);
 
 ORTP_PUBLIC void rtp_session_enable_network_simulation(RtpSession *session, const OrtpNetworkSimulatorParams *params);
 ORTP_PUBLIC void rtp_session_enable_congestion_detection(RtpSession *session, bool_t enabled);
+ORTP_PUBLIC void rtp_session_enable_video_bandwidth_estimator(RtpSession *session, const OrtpVideoBandwidthEstimatorParams *params);
 
 ORTP_PUBLIC void rtp_session_rtcp_set_lost_packet_value( RtpSession *session, const int value );
 ORTP_PUBLIC void rtp_session_rtcp_set_jitter_value(RtpSession *session, const unsigned int value );

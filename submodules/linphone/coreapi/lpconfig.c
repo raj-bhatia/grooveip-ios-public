@@ -24,7 +24,6 @@
 
 #define MAX_LEN 16384
 
-#include "private.h"
 #include "bctoolbox/vfs.h"
 #include "belle-sip/object.h"
 #include "xml2lpc.h"
@@ -60,6 +59,8 @@
 
 #include "linphone/lpconfig.h"
 #include "lpc2xml.h"
+
+#include "c-wrapper/c-wrapper.h"
 
 typedef struct _LpItem{
 	char *key;
@@ -258,14 +259,14 @@ LpItem *lp_section_find_item(const LpSection *sec, const char *name){
 	return NULL;
 }
 
-static LpSection* linphone_config_parse_line(LpConfig* lpconfig, const char* line, LpSection* cur) {
+static LpSection* linphone_config_parse_line(LpConfig* lpconfig, char* line, LpSection* cur) {
 	LpSectionParam *params = NULL;
 	char *pos1,*pos2;
 	int nbs;
 	size_t size=strlen(line)+1;
-	char *secname=ms_malloc(size);
-	char *key=ms_malloc(size);
-	char *value=ms_malloc(size);
+	char *secname=reinterpret_cast<char *>(ms_malloc(size));
+	char *key=reinterpret_cast<char *>(ms_malloc(size));
+	char *value=reinterpret_cast<char *>(ms_malloc(size));
 	LpItem *item;
 
 	pos1=strchr(line,'[');
@@ -523,7 +524,7 @@ static void xml2lpc_callback(void *ctx, xml2lpc_log_level level, const char *fmt
 		case XML2LPC_DEBUG: bctbx_level = BCTBX_LOG_DEBUG; break;
 		case XML2LPC_MESSAGE: bctbx_level = BCTBX_LOG_MESSAGE;break;
 		case XML2LPC_WARNING: bctbx_level = BCTBX_LOG_WARNING;break;
-		case XML2LPC_ERROR: 
+		case XML2LPC_ERROR:
 		default:
 			bctbx_level = BCTBX_LOG_ERROR;break;
 	}
@@ -631,7 +632,7 @@ bctbx_list_t * linphone_config_get_string_list(const LpConfig *lpconfig, const c
 bool_t linphone_config_get_range(const LpConfig *lpconfig, const char *section, const char *key, int *min, int *max, int default_min, int default_max) {
 	const char *str = linphone_config_get_string(lpconfig, section, key, NULL);
 	if (str != NULL) {
-		char *minusptr = strchr(str, '-');
+		const char *minusptr = strchr(str, '-');
 		if ((minusptr == NULL) || (minusptr == str)) {
 			*min = default_min;
 			*max = default_max;
@@ -647,7 +648,6 @@ bool_t linphone_config_get_range(const LpConfig *lpconfig, const char *section, 
 	}
 }
 
-
 int linphone_config_get_int(const LpConfig *lpconfig,const char *section, const char *key, int default_value){
 	const char *str=linphone_config_get_string(lpconfig,section,key,NULL);
 	if (str!=NULL) {
@@ -660,6 +660,16 @@ int linphone_config_get_int(const LpConfig *lpconfig,const char *section, const 
 		return ret;
 	}
 	else return default_value;
+}
+
+bool_t linphone_config_get_bool(const LpConfig *lpconfig, const char *section, const char *key, bool_t default_value) {
+	const char *str = linphone_config_get_string(lpconfig, section, key, NULL);
+	if (str != NULL) {
+		int ret = 0;
+		sscanf(str, "%i", &ret);
+		return ret != 0;
+	}
+	return default_value;
 }
 
 int64_t linphone_config_get_int64(const LpConfig *lpconfig,const char *section, const char *key, int64_t default_value){
@@ -774,6 +784,14 @@ void linphone_config_set_int(LpConfig *lpconfig,const char *section, const char 
 	linphone_config_set_string(lpconfig,section,key,tmp);
 }
 
+void linphone_config_set_bool(LpConfig *lpconfig, const char *section, const char *key, bool_t value) {
+	if (value) {
+		linphone_config_set_int(lpconfig, section, key, 1);
+	} else {
+		linphone_config_set_int(lpconfig, section, key, 0);
+	}
+}
+
 void linphone_config_set_int_hex(LpConfig *lpconfig,const char *section, const char *key, int value){
 	char tmp[30];
 	snprintf(tmp,sizeof(tmp),"0x%x",value);
@@ -832,11 +850,11 @@ void linphone_config_set_skip_flag_for_section(LpConfig *lpconfig, const char *s
 void lp_item_write(LpItem *item, LpConfig *lpconfig){
 	int ret =-1 ;
 	if (item->is_comment){
-		ret =bctbx_file_fprintf(lpconfig->pFile, 0, "%s\n",item->value);
+		ret = (int)bctbx_file_fprintf(lpconfig->pFile, 0, "%s\n",item->value);
 
 	}
 	else if (item->value && item->value[0] != '\0' ){
-		ret =bctbx_file_fprintf(lpconfig->pFile, 0, "%s=%s\n",item->key,item->value);
+		ret = (int)bctbx_file_fprintf(lpconfig->pFile, 0, "%s=%s\n",item->key,item->value);
 	}
 
 	else {
@@ -1115,7 +1133,7 @@ const char** linphone_config_get_sections_names(LpConfig *lpconfig) {
 	int i;
 
 	ndev = bctbx_list_size(sections);
-	sections_names = ms_malloc((ndev + 1) * sizeof(const char *));
+	sections_names = reinterpret_cast<const char **>(ms_malloc((ndev + 1) * sizeof(const char *)));
 
 	for (i = 0; sections != NULL; sections = sections->next, i++) {
 		LpSection *section = (LpSection *)sections->data;
@@ -1123,6 +1141,19 @@ const char** linphone_config_get_sections_names(LpConfig *lpconfig) {
 	}
 
 	sections_names[ndev] = NULL;
+	return sections_names;
+}
+
+const bctbx_list_t * linphone_config_get_sections_names_list(LpConfig *lpconfig) {
+	const bctbx_list_t *sections = lpconfig->sections;
+	bctbx_list_t *sections_names = NULL;
+	int i;
+
+	for (i = 0; sections != NULL; sections = sections->next, i++) {
+		LpSection *section = (LpSection *)sections->data;
+		sections_names = bctbx_list_append(sections_names, section->name);
+	}
+
 	return sections_names;
 }
 

@@ -61,6 +61,8 @@
 #cmakedefine HAVE_UINT64_T 1
 #cmakedefine SIZEOF_UNSIGNED_LONG @SIZEOF_UNSIGNED_LONG@
 #cmakedefine SIZEOF_UNSIGNED_LONG_LONG @SIZEOF_UNSIGNED_LONG_LONG@
+#cmakedefine PACKAGE_STRING "libsrtp2 2.2.0-pre"
+#cmakedefine PACKAGE_VERSION "2.0.1-pre"
 
 #ifndef __cplusplus
 #cmakedefine inline @inline@

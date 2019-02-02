@@ -587,7 +587,8 @@ static void receiver_init(MSFilter * f)
 }
 
 static void receiver_postprocess(MSFilter * f){
-	/*ReceiverData *d = (ReceiverData *) f->data;*/
+	ReceiverData *d = (ReceiverData *) f->data;
+	rtp_session_reset_recvfrom(d->session);
 }
 
 static void receiver_uninit(MSFilter * f){

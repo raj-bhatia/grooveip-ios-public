@@ -1,22 +1,20 @@
 /*
 	belle-sip - SIP (RFC3261) library.
-    Copyright (C) 2010  Belledonne Communications SARL
+	Copyright (C) 2010-2018  Belledonne Communications SARL
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 2 of the License, or
+	(at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
-
-
 
 #include "belle-sip/headers.h"
 #include "belle-sip/parameters.h"
@@ -187,6 +185,7 @@ struct _belle_sip_header_address {
 	char* displayname;
 	belle_sip_uri_t* uri;
 	belle_generic_uri_t* absolute_uri;
+	unsigned char automatic;
 };
 
 static void belle_sip_header_address_init(belle_sip_header_address_t* object){
@@ -199,7 +198,7 @@ static void belle_sip_header_address_destroy(belle_sip_header_address_t* address
 	if (address->absolute_uri) belle_sip_object_unref(address->absolute_uri);
 }
 
-static void belle_sip_header_address_clone(belle_sip_header_address_t *addr, const belle_sip_header_address_t *orig){
+static void _belle_sip_header_address_clone(belle_sip_header_address_t *addr, const belle_sip_header_address_t *orig){
 	CLONE_STRING(belle_sip_header_address,displayname,addr,orig)
 	if (belle_sip_header_address_get_uri(orig)) {
 		belle_sip_header_address_set_uri(addr,BELLE_SIP_URI(belle_sip_object_clone(BELLE_SIP_OBJECT(belle_sip_header_address_get_uri(orig)))));
@@ -207,8 +206,13 @@ static void belle_sip_header_address_clone(belle_sip_header_address_t *addr, con
 	if (belle_sip_header_address_get_absolute_uri(orig)) {
 		belle_sip_header_address_set_absolute_uri(addr,BELLE_GENERIC_URI(belle_sip_object_clone(BELLE_SIP_OBJECT(belle_sip_header_address_get_absolute_uri(orig)))));
 	}
+	belle_sip_parameters_copy_parameters_from(&addr->base, &orig->base);
 }
-
+belle_sip_header_address_t* belle_sip_header_address_clone(const belle_sip_header_address_t* orig) {
+	belle_sip_header_address_t* new_address = belle_sip_header_address_new();
+	_belle_sip_header_address_clone(new_address, orig);
+	return new_address;
+}
 static belle_sip_error_code _belle_sip_header_address_marshal(belle_sip_header_address_t* header, char* buff, size_t buff_size, size_t *offset, int force_angle_quote) {
 	belle_sip_error_code error=BELLE_SIP_OK;
 	/*1 display name*/
@@ -253,7 +257,7 @@ static belle_sip_error_code _belle_sip_header_address_marshal(belle_sip_header_a
 belle_sip_error_code belle_sip_header_address_marshal(belle_sip_header_address_t* header, char* buff, size_t buff_size, size_t *offset){
 	return _belle_sip_header_address_marshal(header, buff, buff_size, offset, FALSE);
 }
-
+#define belle_sip_header_address_clone _belle_sip_header_address_clone /*because public clone function is not the one to be used internally*/
 BELLE_SIP_NEW_HEADER(header_address,parameters,"header_address")
 BELLE_SIP_PARSE(header_address)
 GET_SET_STRING(belle_sip_header_address,displayname);
@@ -280,6 +284,14 @@ void belle_sip_header_address_set_uri(belle_sip_header_address_t* address, belle
 		belle_sip_warning("sip absolute uri [%p] already set for header_address [%p], cleaning it",address->absolute_uri, address);
 		belle_sip_header_address_set_absolute_uri(address,NULL);
 	}
+}
+
+void belle_sip_header_address_set_automatic(belle_sip_header_address_t *address, int automatic){
+	address->automatic = (unsigned char)automatic;
+}
+
+int belle_sip_header_address_get_automatic(const belle_sip_header_address_t *address){
+	return address->automatic;
 }
 
 belle_generic_uri_t* belle_sip_header_address_get_absolute_uri(const belle_sip_header_address_t* address) {
@@ -314,7 +326,7 @@ belle_sip_header_address_t* belle_sip_header_address_create2(const char* display
 
 /*fast header address implemenation*/
 typedef belle_sip_header_address_t belle_sip_fast_header_address_t;
-#define belle_sip_fast_header_address_parse belle_sip_header_address_fast_parse  
+#define belle_sip_fast_header_address_parse belle_sip_header_address_fast_parse
 BELLE_SIP_PARSE(fast_header_address)
 
 
@@ -360,9 +372,8 @@ GET_SET_STRING(belle_sip_header_allow,method);
 struct _belle_sip_header_contact {
 	belle_sip_header_address_t address;
 	unsigned char wildcard;
-	unsigned char automatic;
 	unsigned char unknown;
-	unsigned char pad[1];
+	unsigned char pad[2];
 };
 
 void belle_sip_header_contact_destroy(belle_sip_header_contact_t* contact) {
@@ -370,7 +381,6 @@ void belle_sip_header_contact_destroy(belle_sip_header_contact_t* contact) {
 
 void belle_sip_header_contact_clone(belle_sip_header_contact_t *contact, const belle_sip_header_contact_t *orig){
 	contact->wildcard=orig->wildcard;
-	contact->automatic=orig->automatic;
 }
 
 belle_sip_error_code belle_sip_header_contact_marshal(belle_sip_header_contact_t* contact, char* buff, size_t buff_size, size_t *offset) {
@@ -427,11 +437,11 @@ unsigned int belle_sip_header_contact_not_equals(const belle_sip_header_contact_
 }
 
 void belle_sip_header_contact_set_automatic(belle_sip_header_contact_t *a, int enabled){
-	a->automatic=enabled;
+	belle_sip_header_address_set_automatic((belle_sip_header_address_t*)a, enabled);
 }
 
 int belle_sip_header_contact_get_automatic(const belle_sip_header_contact_t *a){
-	return a->automatic;
+	return belle_sip_header_address_get_automatic((belle_sip_header_address_t*)a);
 }
 
 void belle_sip_header_contact_set_unknown(belle_sip_header_contact_t *a, int value){
@@ -1744,8 +1754,8 @@ static const char *months[]={"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Se
 
 BELLESIP_EXPORT time_t belle_sip_header_date_get_time(belle_sip_header_date_t *obj){
 	struct tm ret ={0};
-	char tmp1[16] ={0};
-	char tmp2[16] ={0};
+	char tmp1[4] ={0};
+	char tmp2[17] ={0};
 	int i,j;
 	time_t seconds;
 #if defined(BELLE_SIP_WINDOWS_UNIVERSAL) || defined(BELLE_SIP_MSC_VER_GREATER_19)
@@ -2106,7 +2116,7 @@ static void belle_sip_header_authentication_info_destroy(belle_sip_header_authen
 	DESTROY_STRING(authentication_info,cnonce);
 	DESTROY_STRING(authentication_info,qop);
 	DESTROY_STRING(authentication_info,next_nonce);
-	
+
 }
 
 static void belle_sip_header_authentication_info_clone(	belle_sip_header_authentication_info_t* authentication_info
@@ -2121,7 +2131,7 @@ belle_sip_error_code belle_sip_header_authentication_info_marshal(belle_sip_head
 	char* border="";
 	belle_sip_error_code error=belle_sip_header_marshal(BELLE_SIP_HEADER(authentication_info), buff, buff_size, offset);
 	if (error!=BELLE_SIP_OK) return error;
-	
+
 	if (authentication_info->rsp_auth) {
 		error=belle_sip_snprintf(buff,buff_size,offset,"%srspauth=\"%s\"", border,authentication_info->rsp_auth);
 		border=", ";
@@ -2145,7 +2155,7 @@ belle_sip_error_code belle_sip_header_authentication_info_marshal(belle_sip_head
 		border=", ";
 	}
 	if (error!=BELLE_SIP_OK) return error;
-	
+
 	if (authentication_info->next_nonce) {
 		error=belle_sip_snprintf(buff,buff_size,offset,"%snextnonce=\"%s\"", border, authentication_info->next_nonce);
 	}

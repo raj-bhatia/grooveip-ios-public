@@ -21,6 +21,10 @@
 #import "PhoneMainView.h"
 
 #import "ChatConversationCreateView.h"
+#if 1	// Changed Linphone code - Added new screen for GrooVe IP SMS
+#import "SmsContactsCreateView.h"
+#endif
+
 @implementation ChatsListView
 
 #pragma mark - ViewController Functions
@@ -36,6 +40,7 @@
 											   name:kLinphoneCallUpdate
 											 object:nil];
 	[_backToCallButton update];
+	self.tableController.waitView = _waitView;
 	[self setEditing:NO];
 }
 
@@ -80,7 +85,16 @@ static UICompositeViewDescription *compositeDescription = nil;
 #pragma mark - Action Functions
 
 - (IBAction)onAddClick:(id)event {
-	[PhoneMainView.instance changeCurrentView:ChatConversationCreateView.compositeViewDescription];
+#if 0	// Changed Linphone code - Display a page similar to the Contacts page
+	ChatConversationCreateView *view = VIEW(ChatConversationCreateView);
+	view.isForEditing = false;
+	view.tableController.notFirstTime = FALSE;
+	[view.tableController.contactsGroup removeAllObjects];
+#else
+	SmsContactsCreateView *view = VIEW(SmsContactsCreateView);
+	[SmsContactSelection setAddAddress:nil];
+#endif
+	[PhoneMainView.instance changeCurrentView:view.compositeViewDescription];
 }
 
 - (IBAction)onEditionChangeClick:(id)sender {
@@ -89,8 +103,18 @@ static UICompositeViewDescription *compositeDescription = nil;
 }
 
 - (IBAction)onDeleteClick:(id)sender {
-	NSString *msg =
-		[NSString stringWithFormat:NSLocalizedString(@"Do you want to delete selected conversations?", nil)];
+	BOOL group = false;
+	NSArray *copy = [[NSArray alloc] initWithArray:_tableController.selectedItems];
+	for (NSIndexPath *indexPath in copy) {
+		LinphoneChatRoom *chatRoom = (LinphoneChatRoom *)bctbx_list_nth_data(_tableController.data, (int)[indexPath row]);
+		if (LinphoneChatRoomCapabilitiesConference & linphone_chat_room_get_capabilities(chatRoom)) {
+			group = true;
+			break;
+		}
+	}
+	NSString *msg = group
+		? [NSString stringWithFormat:NSLocalizedString(@"Do you want to leave and delete the selected conversations?", nil)]
+		: [NSString stringWithFormat:NSLocalizedString(@"Do you want to delete the selected conversations?", nil)];
 	[UIConfirmationDialog ShowWithMessage:msg
 		cancelMessage:nil
 		confirmMessage:nil
@@ -99,7 +123,6 @@ static UICompositeViewDescription *compositeDescription = nil;
 		}
 		onConfirmationClick:^() {
 		  [_tableController removeSelectionUsing:nil];
-		  [_tableController loadData];
 		  [self onEditionChangeClick:nil];
 		}];
 }

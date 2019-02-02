@@ -50,6 +50,7 @@ typedef enum {
 + (UIImage *)selfAvatar;
 
 + (NSString *)durationToString:(int)duration;
++ (NSString *)intervalToString:(NSTimeInterval)interval ;
 
 @end
 
@@ -80,6 +81,7 @@ typedef enum {
 #else
 + (BOOL)setDisplayNameLabel:(UILabel *)label forAddress:(const LinphoneAddress *)addr;
 #endif
++ (void)setDisplayNameLabel:(UILabel *)label forAddress:(const LinphoneAddress *)addr withAddressLabel:(UILabel*)addressLabel;
 @end
 
 #import <UIKit/UIColor.h>

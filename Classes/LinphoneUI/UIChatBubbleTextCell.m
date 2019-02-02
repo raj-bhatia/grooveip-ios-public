@@ -40,33 +40,55 @@
 			[self addSubview:sub];
 		}
 	}
+
+	UITapGestureRecognizer *limeRecognizer =
+	[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(onLime)];
+	limeRecognizer.numberOfTapsRequired = 1;
+	[_LIMEKO addGestureRecognizer:limeRecognizer];
+	_LIMEKO.userInteractionEnabled = YES;
+	UITapGestureRecognizer *resendRecognizer =
+	[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(onResend)];
+	resendRecognizer.numberOfTapsRequired = 1;
+	[_imdmIcon addGestureRecognizer:resendRecognizer];
+	_imdmIcon.userInteractionEnabled = YES;
+	UITapGestureRecognizer *resendRecognizer2 =
+	[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(onResend)];
+	resendRecognizer2.numberOfTapsRequired = 1;
+	[_imdmLabel addGestureRecognizer:resendRecognizer2];
+	_imdmLabel.userInteractionEnabled = YES;
+
 	return self;
 }
 
 - (void)dealloc {
+	[self setEvent:NULL];
 	[self setChatMessage:NULL];
 }
 
 #pragma mark -
 
+- (void)setEvent:(LinphoneEventLog *)event {
+	if(!event)
+		return;
+
+	_event = event;
+	if (!(linphone_event_log_get_type(event) == LinphoneEventLogTypeConferenceChatMessage)) {
+		LOGE(@"Impossible to create a ChatBubbleText whit a non message event");
+		return;
+	}
+	[self setChatMessage:linphone_event_log_get_chat_message(event)];
+}
+
 - (void)setChatMessage:(LinphoneChatMessage *)amessage {
-	if (amessage == _message) {
+	if (!amessage || amessage == _message) {
 		return;
 	}
 
-	if (_message) {
-		linphone_chat_message_unref(_message);
-		CFBridgingRelease(linphone_chat_message_get_user_data(_message));
-		linphone_chat_message_set_user_data(_message, NULL);
-		linphone_chat_message_cbs_set_msg_state_changed(linphone_chat_message_get_callbacks(_message), NULL);
-	}
-
 	_message = amessage;
-	if (amessage) {
-		linphone_chat_message_ref(_message);
-		linphone_chat_message_set_user_data(_message, (void *)CFBridgingRetain(self));
-		linphone_chat_message_cbs_set_msg_state_changed(linphone_chat_message_get_callbacks(_message), message_status);
-	}
+	linphone_chat_message_set_user_data(_message, (void *)CFBridgingRetain(self));
+	LinphoneChatMessageCbs *cbs = linphone_chat_message_get_callbacks(_message);
+	linphone_chat_message_cbs_set_msg_state_changed(cbs, message_status);
+	linphone_chat_message_cbs_set_user_data(cbs, (void *)_event);
 }
 
 + (NSString *)TextMessageForChat:(LinphoneChatMessage *)message {
@@ -76,14 +98,13 @@
 	if (url || last_content) {
 		return @"🗻";
 	} else {
-		const char *text = linphone_chat_message_get_text(message) ?: "";
+		const char *text = linphone_chat_message_get_text_content(message) ?: "";
 		return [NSString stringWithUTF8String:text] ?: [NSString stringWithCString:text encoding:NSASCIIStringEncoding]
 														   ?: NSLocalizedString(@"(invalid string)", nil);
 	}
 }
 
 + (NSString *)ContactDateForChat:(LinphoneChatMessage *)message {
-#if 0	// Changed Linphone code - For app's phone number, display "You", not the phone number
 	const LinphoneAddress *address =
 		linphone_chat_message_get_from_address(message)
 			? linphone_chat_message_get_from_address(message)
@@ -91,22 +112,6 @@
 	return [NSString stringWithFormat:@"%@ - %@", [LinphoneUtils timeToString:linphone_chat_message_get_time(message)
 																   withFormat:LinphoneDateChatBubble],
 									  [FastAddressBook displayNameForAddress:address]];
-#else
-	BOOL outgoing = linphone_chat_message_is_outgoing(message);
-	if (outgoing) {
-		return [NSString stringWithFormat:@"%@ - %@", [LinphoneUtils timeToString:linphone_chat_message_get_time(message)
-																	   withFormat:LinphoneDateChatBubble],
-				@"You"];
-	} else {
-		const LinphoneAddress *address =
-			linphone_chat_message_get_from_address(message)
-				? linphone_chat_message_get_from_address(message)
-				: linphone_chat_room_get_peer_address(linphone_chat_message_get_chat_room(message));
-		return [NSString stringWithFormat:@"%@ - %@", [LinphoneUtils timeToString:linphone_chat_message_get_time(message)
-																	   withFormat:LinphoneDateChatBubble],
-				[FastAddressBook displayNameForAddress:address]];
-	}
-#endif
 }
 
 - (NSString *)textMessage {
@@ -141,7 +146,7 @@
 	if (outgoing) {
 		_avatarImage.image = [LinphoneUtils selfAvatar];
 	} else {
-		[_avatarImage setImage:[FastAddressBook imageForAddress:linphone_chat_message_get_peer_address(_message)]
+		[_avatarImage setImage:[FastAddressBook imageForAddress:linphone_chat_message_get_from_address(_message)]
 					  bordered:NO
 			 withRoundedRadius:YES];
 	}
@@ -152,25 +157,14 @@
 	_contactDateLabel.textColor = [UIColor colorWithPatternImage:_backgroundColorImage.image];
 
 	if (outgoing && state == LinphoneChatMessageStateInProgress) {
-		_statusErrorImage.hidden = YES;
 		[_statusInProgressSpinner startAnimating];
 	} else if (!outgoing && state == LinphoneChatMessageStateFileTransferError) {
-		_statusErrorImage.hidden = NO;
 		[_statusInProgressSpinner stopAnimating];
 	} else {
-		_statusErrorImage.hidden = YES;
 		[_statusInProgressSpinner stopAnimating];
 	}
 
-	if (outgoing) {
-		[_messageText setAccessibilityLabel:@"Outgoing message"];
-	} else {
-		[_messageText setAccessibilityLabel:@"Incoming message"];
-		if ([UIApplication sharedApplication].applicationState == UIApplicationStateActive) {
-			VIEW(ChatConversationView).markAsRead;
-		}
-	}
-
+	[_messageText setAccessibilityLabel:outgoing ? @"Outgoing message" : @"Incoming message"];
 	if (outgoing &&
 		(state == LinphoneChatMessageStateDeliveredToUser || state == LinphoneChatMessageStateDisplayed ||
 		 state == LinphoneChatMessageStateNotDelivered || state == LinphoneChatMessageStateFileTransferError)) {
@@ -212,7 +206,7 @@
 
 #pragma mark - Action Functions
 
-- (IBAction)onDeleteClick:(id)event {
+- (void)onDelete {
 	if (_message != NULL) {
 		UITableView *tableView = VIEW(ChatConversationView).tableController.tableView;
 		NSIndexPath *indexPath = [tableView indexPathForCell:self];
@@ -222,50 +216,50 @@
 	}
 }
 
-- (IBAction)onResendClick:(id)event {
-	if (!_LIMEKO.hidden) {
+- (void)onLime {
+	if (!_LIMEKO.hidden)
 		[self displayLIMEWarning];
-		return;
-	}
+}
 
+- (void)onResend {
 	if (_message == nil || !linphone_chat_message_is_outgoing(_message))
 		return;
 
 	LinphoneChatMessageState state = linphone_chat_message_get_state(_message);
-	if (state == LinphoneChatMessageStateNotDelivered || state == LinphoneChatMessageStateFileTransferError) {
-		if (linphone_chat_message_get_file_transfer_information(_message) != NULL) {
-			NSString *localImage = [LinphoneManager getMessageAppDataForKey:@"localimage" inMessage:_message];
-			NSURL *imageUrl = [NSURL URLWithString:localImage];
+	if (state != LinphoneChatMessageStateNotDelivered && state != LinphoneChatMessageStateFileTransferError)
+		return;
 
-			[self onDeleteClick:nil];
-
-			[LinphoneManager.instance.photoLibrary assetForURL:imageUrl
-				resultBlock:^(ALAsset *asset) {
-				  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, (unsigned long)NULL),
-								 ^(void) {
-								   UIImage *image = [[UIImage alloc] initWithCGImage:[asset thumbnail]];
-								   [_chatRoomDelegate startImageUpload:image url:imageUrl];
-								 });
-				}
-				failureBlock:^(NSError *error) {
-				  LOGE(@"Can't read image");
-				}];
-		} else {
-			[self onDeleteClick:nil];
-
-			double delayInSeconds = 0.4;
-			dispatch_time_t popTime = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayInSeconds * NSEC_PER_SEC));
-			dispatch_after(popTime, dispatch_get_main_queue(), ^(void) {
-			  [_chatRoomDelegate resendChat:self.textMessage withExternalUrl:nil];
-			});
-		}
+	if (linphone_chat_message_get_file_transfer_information(_message) != NULL) {
+		NSString *localImage = [LinphoneManager getMessageAppDataForKey:@"localimage" inMessage:_message];
+		NSNumber *uploadQuality =[LinphoneManager getMessageAppDataForKey:@"uploadQuality" inMessage:_message];
+		NSURL *imageUrl = [NSURL URLWithString:localImage];
+		[self onDelete];
+		[LinphoneManager.instance.photoLibrary assetForURL:imageUrl
+			resultBlock:^(ALAsset *asset) {
+			  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, (unsigned long)NULL),
+							 ^(void) {
+								UIImage *image = [[UIImage alloc] initWithCGImage:[[asset defaultRepresentation] fullResolutionImage]];
+								[_chatRoomDelegate startImageUpload:image url:imageUrl withQuality:(uploadQuality ? [uploadQuality floatValue] : 0.9)];
+							 });
+			}
+			failureBlock:^(NSError *error) {
+			  LOGE(@"Can't read image");
+			}];
+	} else {
+		[self onDelete];
+		double delayInSeconds = 0.4;
+		dispatch_time_t popTime = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayInSeconds * NSEC_PER_SEC));
+		dispatch_after(popTime, dispatch_get_main_queue(), ^(void) {
+		  [_chatRoomDelegate resendChat:self.textMessage withExternalUrl:nil];
+		});
 	}
 }
 #pragma mark - State changed handling
 static void message_status(LinphoneChatMessage *msg, LinphoneChatMessageState state) {
 	LOGI(@"State for message [%p] changed to %s", msg, linphone_chat_message_state_to_string(state));
+	LinphoneEventLog *event = (LinphoneEventLog *)linphone_chat_message_cbs_get_user_data(linphone_chat_message_get_callbacks(msg));
 	ChatConversationView *view = VIEW(ChatConversationView);
-	[view.tableController updateChatEntry:msg];
+	[view.tableController updateEventEntry:event];
 }
 
 - (void)displayImdmStatus:(LinphoneChatMessageState)state {
@@ -277,10 +271,8 @@ static void message_status(LinphoneChatMessage *msg, LinphoneChatMessageState st
 		[_imdmLabel setHidden:FALSE];
 	} else if (state == LinphoneChatMessageStateDisplayed) {
 		[_imdmIcon setImage:[UIImage imageNamed:@"chat_read"]];
-		[_imdmLabel setText:NSLocalizedString(@"Displayed", nil)];
-		[_imdmLabel
-			setTextColor:([UIColor colorWithRed:(24 / 255.0) green:(167 / 255.0) blue:(175 / 255.0) alpha:1.0])];
-
+		[_imdmLabel setText:NSLocalizedString(@"Read", nil)];
+		[_imdmLabel setTextColor:([UIColor colorWithRed:(24 / 255.0) green:(167 / 255.0) blue:(175 / 255.0) alpha:1.0])];
 		[_imdmIcon setHidden:FALSE];
 		[_imdmLabel setHidden:FALSE];
 	} else if (state == LinphoneChatMessageStateNotDelivered || state == LinphoneChatMessageStateFileTransferError) {
@@ -309,21 +301,13 @@ static void message_status(LinphoneChatMessage *msg, LinphoneChatMessageState st
 	if (!text || text.length == 0)
 		return CGSizeMake(0, 0);
 
-#pragma deploymate push "ignored-api-availability"
-#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 70000
-	if ([[[UIDevice currentDevice] systemVersion] doubleValue] >= 7) {
-		return [text boundingRectWithSize:size
-								  options:(NSStringDrawingUsesLineFragmentOrigin |
-										   NSStringDrawingTruncatesLastVisibleLine | NSStringDrawingUsesFontLeading)
-							   attributes:@{
-								   NSFontAttributeName : font
-							   }
-								  context:nil]
-			.size;
-	}
-#endif
-#pragma deploymate pop
-	{ return [text sizeWithFont:font constrainedToSize:size lineBreakMode:NSLineBreakByCharWrapping]; }
+	return [text boundingRectWithSize:size
+							  options:(NSStringDrawingUsesLineFragmentOrigin |
+									   NSStringDrawingTruncatesLastVisibleLine | NSStringDrawingUsesFontLeading)
+						   attributes:@{
+							   NSFontAttributeName : font
+						   }
+							  context:nil].size;
 }
 
 static const CGFloat CELL_MIN_HEIGHT = 60.0f;

@@ -46,6 +46,14 @@ set(SOURCE_FILES_C
 	register_tester.h
 )
 
+set(OTHER_FILES
+	tester_hosts
+)
+
+add_definitions(
+	-DBCTBX_LOG_DOMAIN="belle-sip"
+)
+
 set(SOURCE_FILES_OBJC )
 if (IOS)
 	list(APPEND SOURCE_FILES_OBJC belle_sip_tester_ios.m)
@@ -118,6 +126,15 @@ else()
 		set_target_properties(belle_sip_object_describe PROPERTIES LINK_FLAGS "${LINK_FLAGS_STR}")
 	endif()
 	target_link_libraries(belle_sip_object_describe ${BCTOOLBOX_CORE_LIBRARIES} ${PROJECT_LIBS})
+	
+	set(OBJECT_RESOLVE_SOURCES resolve.c)
+	bc_apply_compile_flags(OBJECT_DESCRIBE_SOURCES STRICT_OPTIONS_CPP STRICT_OPTIONS_C)
+	add_executable(belle_sip_resolve ${USE_BUNDLE} ${OBJECT_RESOLVE_SOURCES})
+	set_target_properties(belle_sip_resolve PROPERTIES LINKER_LANGUAGE CXX)
+	if(NOT "${LINK_FLAGS_STR}" STREQUAL "")
+		set_target_properties(belle_sip_resolve PROPERTIES LINK_FLAGS "${LINK_FLAGS_STR}")
+	endif()
+	target_link_libraries(belle_sip_resolve ${BCTOOLBOX_CORE_LIBRARIES} ${PROJECT_LIBS})
 
 
 	set(PARSE_SOURCES parse.c)
@@ -131,3 +148,5 @@ else()
 	target_link_libraries(belle_sip_parse ${BCTOOLBOX_CORE_LIBRARIES} ${PROJECT_LIBS})
 
 endif()
+
+install(FILES ${OTHER_FILES} DESTINATION "${CMAKE_INSTALL_DATADIR}/belle_sip_tester")

@@ -30,7 +30,12 @@
 #import "CallOutgoingView.h"
 #import "CallSideMenuView.h"
 #import "CallView.h"
+#if 1	// Changed Linphone code - Added new screen for GrooVe IP SMS
+#import "SmsContactsCreateView.h"
+#endif
 #import "ChatConversationCreateView.h"
+#import "ChatConversationInfoView.h"
+#import "ChatConversationImdnView.h"
 #import "ChatConversationView.h"
 #import "ChatsListView.h"
 #import "ContactDetailsView.h"
@@ -56,6 +61,8 @@
 #define VIEW(x)                                                                                                        \
 	DYNAMIC_CAST([PhoneMainView.instance.mainViewController getCachedController:x.compositeViewDescription.name], x)
 
+#define LINPHONE_DUMMY_SUBJECT "dummy subject"
+
 @class PhoneMainView;
 
 @interface RootViewManager : NSObject
@@ -79,14 +86,19 @@
 @property(nonatomic, strong) IBOutlet UICompositeView *mainViewController;
 
 @property(nonatomic, strong) NSString *currentName;
+@property(nonatomic, strong) NSString *previousView;
 @property(nonatomic, strong) NSString *name;
 @property(weak, readonly) UICompositeViewDescription *currentView;
 @property LinphoneChatRoom* currentRoom;
 @property(readonly, strong) MPVolumeView *volumeView;
+@property (weak, nonatomic) UIView *waitView;
 
 - (void)changeCurrentView:(UICompositeViewDescription *)view;
 - (UIViewController*)popCurrentView;
 - (UIViewController *)popToView:(UICompositeViewDescription *)currentView;
+- (void) setPreviousViewName:(NSString*)previous;
+- (NSString*) getPreviousViewName;
++ (NSString*) getPreviousViewName;
 - (UICompositeViewDescription *)firstView;
 - (void)hideStatusBar:(BOOL)hide;
 - (void)hideTabBar:(BOOL)hide;
@@ -100,6 +112,13 @@
 - (BOOL)removeInhibitedEvent:(id)event;
 
 - (void)updateApplicationBadgeNumber;
+- (void)getOrCreateOneToOneChatRoom:(const LinphoneAddress *)remoteAddress waitView:(UIView *)waitView;
+- (void)createChatRoomWithSubject:(const char *)subject addresses:(bctbx_list_t *)addresses andWaitView:(UIView *)waitView;
+- (void)goToChatRoom:(LinphoneChatRoom *)cr;
 + (PhoneMainView*) instance;
 
+- (BOOL)isIphoneXDevice;
+
 @end
+
+void main_view_chat_room_state_changed(LinphoneChatRoom *cr, LinphoneChatRoomState newState);

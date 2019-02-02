@@ -16,8 +16,9 @@
  along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <belle-sip/belle-sip.h>
 #include "liblinphone_tester.h"
-#include "private.h"
+#include "tester_utils.h"
 
 struct _Account{
 	LinphoneAddress *identity;
@@ -27,6 +28,7 @@ struct _Account{
 	int done;
 	int created;
 	char *phone_alias;
+	char *uuid;
 };
 
 typedef struct _Account Account;
@@ -49,6 +51,7 @@ static Account *account_new(LinphoneAddress *identity, const char *unique_id){
 };
 
 void account_destroy(Account *obj){
+	if (obj->uuid) bctbx_free(obj->uuid);
 	linphone_address_unref(obj->identity);
 	linphone_address_unref(obj->modified_identity);
 	ms_free(obj->password);
@@ -94,11 +97,25 @@ Account *account_manager_get_account(AccountManager *m, const LinphoneAddress *i
 	return NULL;
 }
 
+LinphoneAddress *account_manager_get_identity_with_modified_identity(const LinphoneAddress *modified_identity){
+	AccountManager *m = account_manager_get();
+	bctbx_list_t *it;
+
+	for(it=m->accounts;it!=NULL;it=it->next){
+		Account *a=(Account*)it->data;
+		if (linphone_address_weak_equal(a->modified_identity,modified_identity)){
+			return a->identity;
+		}
+	}
+	return NULL;
+}
+
+
 static void account_created_on_server_cb(LinphoneCore *lc, LinphoneProxyConfig *cfg, LinphoneRegistrationState state, const char *info){
 	Account *account=(Account*)linphone_core_get_user_data(lc);
 	switch(state){
 		case LinphoneRegistrationOk: {
-			char * phrase = sal_op_get_error_info((SalOp*)cfg->op)->full_string;
+			char * phrase = sal_op_get_error_info(linphone_proxy_config_get_sal_op(cfg))->full_string;
 			if (phrase && strcasecmp("Test account created", phrase) == 0) {
 				account->created=1;
 			} else {
@@ -114,17 +131,7 @@ static void account_created_on_server_cb(LinphoneCore *lc, LinphoneProxyConfig *
 	}
 }
 
-// TEMPORARY CODE: remove function below when flexisip is updated, this is not needed anymore!
-// The new flexisip now answer "200 Test account created" when creating a test account, and do not
-// challenge authentication anymore! so this code is not used for newer version
-static void account_created_auth_requested_cb(LinphoneCore *lc, const char *username, const char *realm, const char *domain){
-	Account *account=(Account*)linphone_core_get_user_data(lc);
-	account->created=1;
-}
-// TEMPORARY CODE: remove line above when flexisip is updated, this is not needed anymore!
-
 void account_create_on_server(Account *account, const LinphoneProxyConfig *refcfg, const char* phone_alias){
-	LinphoneCoreVTable vtable={0};
 	LinphoneCore *lc;
 	LinphoneAddress *tmp_identity=linphone_address_clone(account->modified_identity);
 	LinphoneProxyConfig *cfg;
@@ -132,13 +139,11 @@ void account_create_on_server(Account *account, const LinphoneProxyConfig *refcf
 	char *tmp;
 	LinphoneAddress *server_addr;
 	LinphoneSipTransports tr;
-	char *chatdb;
+	LinphoneCoreCbs *cbs = linphone_factory_create_core_cbs(linphone_factory_get());
 
-	vtable.registration_state_changed=account_created_on_server_cb;
-	// TEMPORARY CODE: remove line below when flexisip is updated, this is not needed anymore!
-	vtable.auth_info_requested=account_created_auth_requested_cb;
-	lc=configure_lc_from(&vtable,bc_tester_get_resource_dir_prefix(),NULL,account);
-	chatdb = ms_strdup(linphone_core_get_chat_database_path(lc));
+	linphone_core_cbs_set_registration_state_changed(cbs, account_created_on_server_cb);
+	lc = configure_lc_from(cbs, bc_tester_get_resource_dir_prefix(), NULL, account);
+	linphone_core_cbs_unref(cbs);
 	tr.udp_port=LC_SIP_TRANSPORT_RANDOM;
 	tr.tcp_port=LC_SIP_TRANSPORT_RANDOM;
 	tr.tls_port=LC_SIP_TRANSPORT_RANDOM;
@@ -194,11 +199,9 @@ void account_create_on_server(Account *account, const LinphoneProxyConfig *refcf
 		ms_error("Account creation could not clean the registration context.");
 	}
 	linphone_core_unref(lc);
-	unlink(chatdb);
-	ms_free(chatdb);
 }
 
-static LinphoneAddress *account_manager_check_account(AccountManager *m, LinphoneProxyConfig *cfg,const char* phone_alias){
+static LinphoneAddress *account_manager_check_account(AccountManager *m, LinphoneProxyConfig *cfg, LinphoneCoreManager *cm){
 	LinphoneCore *lc=linphone_proxy_config_get_core(cfg);
 	const char *identity=linphone_proxy_config_get_identity(cfg);
 	LinphoneAddress *id_addr=linphone_address_new(identity);
@@ -209,6 +212,7 @@ static LinphoneAddress *account_manager_check_account(AccountManager *m, Linphon
 																		,NULL
 																		, linphone_address_get_username(id_addr)
 																		, linphone_address_get_domain(id_addr));
+	const char *phone_alias = cm->phone_alias;
 
 	if (!account||(phone_alias&&(!account->phone_alias||strcmp(phone_alias,account->phone_alias)!=0))){
 		if (account) {
@@ -229,6 +233,16 @@ static LinphoneAddress *account_manager_check_account(AccountManager *m, Linphon
 		account_create_on_server(account,cfg,phone_alias);
 	}
 
+	if (liblinphone_tester_keep_uuid) {
+		/* create and/or set uuid */
+		if (account->uuid == NULL) {
+			char tmp[64];
+			sal_create_uuid(linphone_core_get_sal(cm->lc), tmp, sizeof(tmp));
+			account->uuid = bctbx_strdup(tmp);
+		}
+		sal_set_uuid(linphone_core_get_sal(cm->lc), account->uuid);
+	}
+
 	/*remove previous auth info to avoid mismatching*/
 	if (original_ai)
 		linphone_core_remove_auth_info(lc,original_ai);
@@ -246,12 +260,12 @@ static LinphoneAddress *account_manager_check_account(AccountManager *m, Linphon
 void linphone_core_manager_check_accounts(LinphoneCoreManager *m){
 	const bctbx_list_t *it;
 	AccountManager *am=account_manager_get();
-	int logmask = ortp_get_log_level_mask(NULL);
-	
+	unsigned int logmask = linphone_core_get_log_level_mask();
+
 	if (!liblinphonetester_show_account_manager_logs) linphone_core_set_log_level_mask(ORTP_ERROR|ORTP_FATAL);
 	for(it=linphone_core_get_proxy_config_list(m->lc);it!=NULL;it=it->next){
 		LinphoneProxyConfig *cfg=(LinphoneProxyConfig *)it->data;
-		account_manager_check_account(am,cfg,m->phone_alias);
+		account_manager_check_account(am,cfg,m);
 	}
 	if (!liblinphonetester_show_account_manager_logs) linphone_core_set_log_level_mask(logmask);
 }

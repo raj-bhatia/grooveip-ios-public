@@ -1,21 +1,20 @@
 /*
-	auth_info.c belle-sip - SIP (RFC3261) library.
-    Copyright (C) 2010  Belledonne Communications SARL
+	belle-sip - SIP (RFC3261) library.
+	Copyright (C) 2010-2018  Belledonne Communications SARL
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 2 of the License, or
+	(at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
-
 
 #include "belle-sip/auth-helper.h"
 #include "belle_sip_internal.h"
@@ -29,12 +28,13 @@ GET_SET_STRING(belle_sip_auth_event,domain)
 GET_SET_STRING(belle_sip_auth_event,passwd)
 GET_SET_STRING(belle_sip_auth_event,ha1)
 GET_SET_STRING(belle_sip_auth_event,distinguished_name)
+GET_SET_STRING(belle_sip_auth_event, algorithm)
 
 belle_sip_auth_event_t* belle_sip_auth_event_create(belle_sip_object_t *source, const char* realm, const belle_sip_uri_t *from_uri) {
 	belle_sip_auth_event_t* result = belle_sip_new0(belle_sip_auth_event_t);
 	result->source=source;
 	belle_sip_auth_event_set_realm(result,realm);
-	
+
 	if (from_uri){
 		belle_sip_auth_event_set_username(result,belle_sip_uri_get_user(from_uri));
 		belle_sip_auth_event_set_domain(result,belle_sip_uri_get_host(from_uri));
@@ -50,6 +50,7 @@ void belle_sip_auth_event_destroy(belle_sip_auth_event_t* event) {
 	DESTROY_STRING(event,passwd);
 	DESTROY_STRING(event,ha1);
 	DESTROY_STRING(event,distinguished_name);
+	DESTROY_STRING(event,algorithm);
 	if (event->cert) belle_sip_object_unref(event->cert);
 	if (event->key) belle_sip_object_unref(event->key);
 
@@ -108,9 +109,11 @@ BELLE_SIP_INSTANCIATE_VPTR(belle_tls_crypto_config_t,belle_sip_object_t,crypto_c
 
 belle_tls_crypto_config_t *belle_tls_crypto_config_new(void){
 	belle_tls_crypto_config_t *obj=belle_sip_object_new(belle_tls_crypto_config_t);
-	
+
 	/*default to "system" default root ca, wihtout warranty...*/
-#ifdef __linux
+#ifdef __ANDROID__
+       belle_tls_crypto_config_set_root_ca(obj,"/system/etc/security/cacerts");
+#elif __linux
 	belle_tls_crypto_config_set_root_ca(obj,"/etc/ssl/certs");
 #elif defined(__APPLE__)
 	belle_tls_crypto_config_set_root_ca(obj,"/opt/local/share/curl/curl-ca-bundle.crt");
@@ -167,3 +170,12 @@ void belle_tls_crypto_config_set_ssl_config(belle_tls_crypto_config_t *obj, void
 	obj->ssl_config = ssl_config;
 }
 
+void belle_tls_crypto_config_set_verify_callback(belle_tls_crypto_config_t *obj, belle_tls_crypto_config_verify_callback_t cb, void *cb_data){
+	obj->verify_cb = cb;
+	obj->verify_cb_data = cb_data;
+}
+
+void belle_tls_crypto_config_set_postcheck_callback(belle_tls_crypto_config_t *obj, belle_tls_crypto_config_postcheck_callback_t cb, void *cb_data){
+	obj->postcheck_cb = cb;
+	obj->postcheck_cb_data = cb_data;
+}

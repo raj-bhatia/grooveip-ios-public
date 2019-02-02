@@ -63,31 +63,47 @@
 		LOGW(@"Cannot update chat cell: null chat");
 		return;
 	}
-	const LinphoneAddress *addr = linphone_chat_room_get_peer_address(chatRoom);
-	[ContactDisplay setDisplayNameLabel:_addressLabel forAddress:addr];
-	[_avatarImage setImage:[FastAddressBook imageForAddress:addr] bordered:NO withRoundedRadius:YES];
 
-	LinphoneChatMessage *last_message = linphone_chat_room_get_user_data(chatRoom);
-	if (last_message) {
-		NSString *message = [UIChatBubbleTextCell TextMessageForChat:last_message];
-		// shorten long messages
-		if ([message length] > 50) {
-			message = [[message substringToIndex:50] stringByAppendingString:@"[...]"];
+	LinphoneChatRoomCapabilitiesMask capabilities = linphone_chat_room_get_capabilities(chatRoom);
+	if (capabilities & LinphoneChatRoomCapabilitiesOneToOne) {
+		bctbx_list_t *participants = linphone_chat_room_get_participants(chatRoom);
+		LinphoneParticipant *firstParticipant = participants ? (LinphoneParticipant *)participants->data : NULL;
+		const LinphoneAddress *addr = firstParticipant ? linphone_participant_get_address(firstParticipant) : linphone_chat_room_get_peer_address(chatRoom);
+		if (addr) {
+			[ContactDisplay setDisplayNameLabel:_addressLabel forAddress:addr];
+			[_avatarImage setImage:[FastAddressBook imageForAddress:addr] bordered:NO withRoundedRadius:YES];
+		} else {
+			_addressLabel.text = [NSString stringWithUTF8String:LINPHONE_DUMMY_SUBJECT];
 		}
-		_chatContentLabel.text = message;
-		_chatLatestTimeLabel.text =
-			[LinphoneUtils timeToString:linphone_chat_message_get_time(last_message) withFormat:LinphoneDateChatList];
-		_chatLatestTimeLabel.hidden = NO;
 	} else {
-		_chatContentLabel.text = nil;
-		_chatLatestTimeLabel.text = NSLocalizedString(@"Now", nil);
+		const char *subject = linphone_chat_room_get_subject(chatRoom);
+		_addressLabel.text = [NSString stringWithUTF8String:subject ?: LINPHONE_DUMMY_SUBJECT];
+		[_avatarImage setImage:[UIImage imageNamed:@"chat_group_avatar.png"] bordered:NO withRoundedRadius:YES];
 	}
+
+	_chatLatestTimeLabel.text = [LinphoneUtils timeToString:linphone_chat_room_get_last_update_time(chatRoom) withFormat:LinphoneDateChatList];
+
+	LinphoneChatMessage *last_msg = linphone_chat_room_get_last_message_in_history(chatRoom);
+	if (last_msg) {
+		NSString *text = [[FastAddressBook displayNameForAddress:linphone_chat_message_get_from_address(last_msg)]
+						  stringByAppendingFormat:@" : %@", [UIChatBubbleTextCell TextMessageForChat:last_msg]];
+		// shorten long messages
+		if ([text length] > 50)
+			text = [[text substringToIndex:50] stringByAppendingString:@"[...]"];
+
+		_chatContentLabel.text = text;
+		linphone_chat_message_unref(last_msg);
+	} else
+		_chatContentLabel.text = nil;
 
 	[self updateUnreadBadge];
 }
 
 - (void)updateUnreadBadge {
 	int count = linphone_chat_room_get_unread_messages_count(chatRoom);
+#if 1	// Changed Linphone code - MMS
+	LOGI(@"UIChatCell updateUnreadBadge: Unread %d", count);
+#endif
 	_unreadCountLabel.text = [NSString stringWithFormat:@"%i", count];
 	if (count > 0) {
 		[_unreadCountView startAnimating:YES];

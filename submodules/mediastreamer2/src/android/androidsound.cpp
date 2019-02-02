@@ -167,7 +167,6 @@ struct AndroidSndReadData{
 	int64_t read_samples;
 	audio_io_handle_t iohandle;
 	jobject aec;
-	double av_skew;
 	bool started;
 	bool builtin_aec;
 };
@@ -185,12 +184,20 @@ struct AndroidSndWriteData{
 		ms_mutex_destroy(&mutex);
 		ms_bufferizer_uninit(&bf);
 	}
+	void updateStreamTypeFromMsSndCard() {
+		MSSndCardStreamType type = ms_snd_card_get_stream_type(soundCard);
+		stype = AUDIO_STREAM_VOICE_CALL;
+		if (type == MS_SND_CARD_STREAM_RING) {
+			stype = AUDIO_STREAM_RING;
+		}
+	}
 	void setCard(AndroidNativeSndCardData *card){
 		mCard=card;
 #ifdef NATIVE_USE_HARDWARE_RATE
 		rate=card->mPlayRate;
 #endif
 	}
+	MSSndCard *soundCard;
 	AndroidNativeSndCardData *mCard;
 	audio_stream_type_t stype;
 	int rate;
@@ -214,6 +221,7 @@ static MSFilter *android_snd_card_create_reader(MSSndCard *card){
 static MSFilter *android_snd_card_create_writer(MSSndCard *card){
 	MSFilter *f=ms_android_snd_write_new(ms_snd_card_get_factory(card));
 	(static_cast<AndroidSndWriteData*>(f->data))->setCard((AndroidNativeSndCardData*)card->data);
+	(static_cast<AndroidSndWriteData*>(f->data))->soundCard = card;
 	return f;
 }
 
@@ -331,14 +339,6 @@ static void android_snd_read_init(MSFilter *obj){
 	obj->data=ad;
 }
 
-static void compute_timespec(AndroidSndReadData *d) {
-	uint64_t ns = ((1000 * d->read_samples) / (uint64_t) d->rate) * 1000000;
-	MSTimeSpec ts;
-	ts.tv_nsec = ns % 1000000000;
-	ts.tv_sec = ns / 1000000000;
-	d->av_skew = ms_ticker_synchronizer_set_external_time(d->mTickerSynchronizer, &ts);
-}
-
 /*
  * This is a callback function called by AudioRecord's thread. This thread is not created by ortp/ms2 and is not able to attach to a JVM without crashing
  * at the end, despite it is detached (since android 4.4).
@@ -352,17 +352,17 @@ static void android_snd_read_cb(int event, void* user, void *p_info){
 	if (ad->mTickerSynchronizer==NULL){
 		MSFilter *obj=ad->mFilter;
 		/*
-		 * ABSOLUTE HORRIBLE HACK. We temporarily disable logs to prevent ms_ticker_set_time_func() to output a debug log.
+		 * ABSOLUTE HORRIBLE HACK. We temporarily disable logs to prevent ms_ticker_set_synchronizer() to output a debug log.
 		 * This is horrible because this also suspends logs for all concurrent threads during these two lines of code.
 		 * Possible way to do better:
 		 *  1) understand why AudioRecord thread doesn't detach.
 		 *  2) disable logs just for this thread (using a TLS)
 		 */
-		int loglevel=ortp_get_log_level_mask(ORTP_LOG_DOMAIN);
-		ortp_set_log_level_mask(NULL, ORTP_ERROR|ORTP_FATAL);
+		int loglevel=bctbx_get_log_level_mask(BCTBX_LOG_DOMAIN);
+		bctbx_set_log_level_mask(NULL, BCTBX_LOG_ERROR|BCTBX_LOG_FATAL);
 		ad->mTickerSynchronizer = ms_ticker_synchronizer_new();
-		ms_ticker_set_time_func(obj->ticker,(uint64_t (*)(void*))ms_ticker_synchronizer_get_corrected_time, ad->mTickerSynchronizer);
-		ortp_set_log_level_mask(ORTP_LOG_DOMAIN, loglevel);
+		ms_ticker_set_synchronizer(obj->ticker, ad->mTickerSynchronizer);
+		bctbx_set_log_level_mask(BCTBX_LOG_DOMAIN, loglevel);
 	}
 	if (event==AudioRecord::EVENT_MORE_DATA){
 		AudioRecord::Buffer info;
@@ -374,7 +374,7 @@ static void android_snd_read_cb(int event, void* user, void *p_info){
 			ad->read_samples+=info.frameCount;
 
 			ms_mutex_lock(&ad->mutex);
-			compute_timespec(ad);
+			ms_ticker_synchronizer_update(ad->mTickerSynchronizer, (uint64_t)ad->read_samples, (unsigned int)ad->rate);
 			putq(&ad->q,m);
 			ms_mutex_unlock(&ad->mutex);
 		}
@@ -449,7 +449,7 @@ static void android_snd_read_postprocess(MSFilter *obj){
 		}
 		ad->rec=0;
 	}
-	ms_ticker_set_time_func(obj->ticker,NULL,NULL);
+	ms_ticker_set_synchronizer(obj->ticker, NULL);
 	ms_mutex_lock(&ad->mutex);
 	ms_ticker_synchronizer_destroy(ad->mTickerSynchronizer);
 	ad->mTickerSynchronizer=NULL;
@@ -479,8 +479,6 @@ static void android_snd_read_process(MSFilter *obj){
 		//ms_message("android_snd_read_process: Outputing %i bytes",msgdsize(om));
 		ms_queue_put(obj->outputs[0],om);
 		ad->nbufs++;
-		if (ad->nbufs % 100 == 0)
-			ms_message("sound/wall clock skew is average=%g ms", ad->av_skew);
 	}
 	ms_mutex_unlock(&ad->mutex);
 }
@@ -717,6 +715,7 @@ static void android_snd_write_preprocess(MSFilter *obj){
 	ad->mCard->enableVoipMode();
 	ad->nFramesRequested=0;
 	
+	ad->updateStreamTypeFromMsSndCard();
 	if (AudioTrack::getMinFrameCount(&play_buf_size,ad->stype,ad->rate)==0){
 		ms_message("AudioTrack: min frame count is %i",play_buf_size);
 	}else{

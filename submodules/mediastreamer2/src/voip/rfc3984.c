@@ -66,6 +66,13 @@ void rfc3984_set_max_payload_size(Rfc3984Context *ctx, int size){
 	ctx->maxsz=size;
 }
 
+Rfc3984Context *rfc3984_new_with_factory(MSFactory *factory){
+	Rfc3984Context *ctx=ms_new0(Rfc3984Context,1);
+	rfc3984_init(ctx);
+	rfc3984_set_max_payload_size(ctx, ms_factory_get_payload_max_size(factory));
+	return ctx;
+}
+
 static void send_packet(Rfc3984Context *ctx, MSQueue *rtpq, uint32_t ts, mblk_t *m, bool_t marker){
 	mblk_set_timestamp_info(m,ts);
 	mblk_set_marker_info(m,marker);
@@ -325,11 +332,13 @@ static int is_unique_I_slice(const uint8_t *slice_header){
 
 static void store_nal(Rfc3984Context *ctx, mblk_t *nal){
 	uint8_t type=nal_header_get_type(nal->b_rptr);
+#if 0
 	if (ms_queue_empty(&ctx->q) && (ctx->status & Rfc3984FrameCorrupted)
 		&& (type == MSH264NaluTypeSPS || type == MSH264NaluTypePPS || type == MSH264NaluTypeIDR)){
 		ms_message("Previous discontinuity ignored since we are restarting with a keyframe.");
 		ctx->status = 0;
 	}
+#endif
 	if ((ctx->status & Rfc3984HasSPS) && (ctx->status & Rfc3984HasPPS) && type != MSH264NaluTypeIDR && mblk_get_marker_info(nal) && is_unique_I_slice(nal->b_rptr+1)){
 		ms_warning("Receiving a nal unit which is not IDR but a single I-slice bundled with SPS & PPS - considering it as a key frame.");
 		ctx->status |= Rfc3984IsKeyFrame;
@@ -455,9 +464,13 @@ void rfc3984_uninit(Rfc3984Context *ctx){
 	if (ctx->m != NULL) freemsg(ctx->m);
 	if (ctx->sps != NULL) freemsg(ctx->sps);
 	if (ctx->pps != NULL) freemsg(ctx->pps);
+	if (ctx->last_pps != NULL) freemsg(ctx->last_pps);
+	if (ctx->last_sps != NULL) freemsg(ctx->last_sps);
 	ctx->m = NULL;
 	ctx->sps = NULL;
 	ctx->pps = NULL;
+	ctx->last_pps = NULL;
+	ctx->last_sps = NULL;
 }
 
 void rfc3984_set_mode(Rfc3984Context *ctx, int mode){

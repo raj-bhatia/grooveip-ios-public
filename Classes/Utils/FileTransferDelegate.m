@@ -40,12 +40,12 @@ static void linphone_iphone_file_transfer_recv(LinphoneChatMessage *message, con
 	size_t size = linphone_buffer_get_size(buffer);
 
 	if (!thiz.data) {
-		thiz.data = [[NSMutableData alloc] initWithCapacity:linphone_content_get_size(content)];
+		thiz.data = [[NSMutableData alloc] initWithCapacity:linphone_content_get_file_size(content)];
 	}
 
 	if (size == 0) {
 		LOGI(@"Transfer of %s (%d bytes): download finished", linphone_content_get_name(content), size);
-		assert([thiz.data length] == linphone_content_get_size(content));
+		assert([thiz.data length] == linphone_content_get_file_size(content));
 
 		// we're finished, save the image and update the message
 		UIImage *image = [UIImage imageWithData:thiz.data];
@@ -65,6 +65,7 @@ static void linphone_iphone_file_transfer_recv(LinphoneChatMessage *message, con
 
 			[errView addAction:defaultAction];
 			[PhoneMainView.instance presentViewController:errView animated:YES completion:nil];
+			[thiz stopAndDestroy];
 			return;
 		}
 
@@ -99,7 +100,6 @@ static void linphone_iphone_file_transfer_recv(LinphoneChatMessage *message, con
 																  forKey:@"localimage"
 															   inMessage:message];
 						   }
-						   thiz.message = NULL;
 						   [NSNotificationCenter.defaultCenter
 							   postNotificationName:kLinphoneFileTransferRecvUpdate
 											 object:thiz
@@ -116,14 +116,14 @@ static void linphone_iphone_file_transfer_recv(LinphoneChatMessage *message, con
 						 }];
 	} else {
 		LOGD(@"Transfer of %s (%d bytes): already %ld sent, adding %ld", linphone_content_get_name(content),
-			 linphone_content_get_size(content), [thiz.data length], size);
+			 linphone_content_get_file_size(content), [thiz.data length], size);
 		[thiz.data appendBytes:linphone_buffer_get_string_content(buffer) length:size];
 		[NSNotificationCenter.defaultCenter
 			postNotificationName:kLinphoneFileTransferRecvUpdate
 						  object:thiz
 						userInfo:@{
 							@"state" : @(linphone_chat_message_get_state(message)),
-							@"progress" : @([thiz.data length] * 1.f / linphone_content_get_size(content)),
+							@"progress" : @([thiz.data length] * 1.f / linphone_content_get_file_size(content)),
 						}];
 	}
 }
@@ -169,10 +169,10 @@ static LinphoneBuffer *linphone_iphone_file_transfer_send(LinphoneChatMessage *m
 }
 
 #if 0	// Changed Linphone code - Return error if image is too large, otherwise return how much to compress it
-- (void)upload:(UIImage *)image withURL:(NSURL *)url forChatRoom:(LinphoneChatRoom *)chatRoom {
+- (void)upload:(UIImage *)image withURL:(NSURL *)url forChatRoom:(LinphoneChatRoom *)chatRoom withQuality:(float)quality {
 	[LinphoneManager.instance.fileTransferDelegates addObject:self];
 	LinphoneContent *content = linphone_core_create_content(linphone_chat_room_get_core(chatRoom));
-	_data = [NSMutableData dataWithData:UIImageJPEGRepresentation(image, 1.0)];
+	_data = [NSMutableData dataWithData:UIImageJPEGRepresentation(image, quality)];
 	linphone_content_set_type(content, "image");
 	linphone_content_set_subtype(content, "jpeg");
 	linphone_content_set_name(
@@ -189,6 +189,7 @@ static LinphoneBuffer *linphone_iphone_file_transfer_send(LinphoneChatMessage *m
 	if (url) {
 		// internal url is saved in the appdata for display and later save
 		[LinphoneManager setValueInMessageAppData:[url absoluteString] forKey:@"localimage" inMessage:_message];
+		[LinphoneManager setValueInMessageAppData:[NSNumber numberWithFloat:quality] forKey:@"uploadQuality" inMessage:_message];
 	}
 
 	LOGI(@"%p Uploading content from message %p", self, _message);
@@ -205,13 +206,13 @@ static LinphoneBuffer *linphone_iphone_file_transfer_send(LinphoneChatMessage *m
 		_data = [NSMutableData dataWithData:UIImageJPEGRepresentation(image, 0.1 * i)];
 		NSNumber *size = [NSNumber numberWithInteger:[_data length]];
 		long iSize = [size integerValue];
-		if (950000 >= iSize) {
+		if (700000 >= iSize) {
 			LOGI(@"upload: Image compression successful - Index %d, Size %ld", i, iSize);
 			break;
 		}
 	}
 	if (0 > i) {	// Image is too large
-		LOGI(@"upload failed: Image cannot be compressed enough to fit in the 950000 byte limit");
+		LOGI(@"upload failed: Image cannot be compressed enough to fit in the 700000 byte limit");
 		return i;
 	}
 	
@@ -258,7 +259,7 @@ static LinphoneBuffer *linphone_iphone_file_transfer_send(LinphoneChatMessage *m
 	return TRUE;
 }
 #else
-- (BOOL)download:(LinphoneChatMessage *)message {
+- (BOOL)download:(LinphoneChatMessage *)message announceCompletion:(BOOL)announce  {
 	_message = message;
 	
 	const char *url = linphone_chat_message_get_external_body_url(_message);
@@ -313,11 +314,17 @@ static LinphoneBuffer *linphone_iphone_file_transfer_send(LinphoneChatMessage *m
 					 LOGI(@"Image saved to [%@]", [assetURL absoluteString]);
 					 [LinphoneManager setValueInMessageAppData:[assetURL absoluteString] forKey:@"localimage" inMessage:_message];
 					 linphone_chat_message_update_state(_message, LinphoneChatMessageStateFileTransferDone);
-					 const LinphoneAddress *from = linphone_chat_message_get_from(_message);
-					 LinphoneChatRoom *cr = linphone_core_get_chat_room(LC, from);
-					 dispatch_async(dispatch_get_main_queue(), ^{
-						 snrblabs_received_photo(LC, cr, _message);
-					 });
+					 if (TRUE == announce) {
+						const LinphoneAddress *from = linphone_chat_message_get_from_address(_message);
+						LinphoneChatRoom *cr = linphone_core_get_chat_room(LC, from);
+						dispatch_async(dispatch_get_main_queue(), ^{
+							linphone_chat_room_receive_chat_message(cr, _message);
+						});
+					 }
+					 [NSThread sleepForTimeInterval : 2.0f];	// Sleep for some time so UI gets updated (otherwise there is a crash)
+					 if (FALSE == announce) {
+						linphone_chat_message_update_state(_message, LinphoneChatMessageStateDisplayed);
+					 }
 				 }
 			 }];
 		}];
@@ -339,8 +346,6 @@ static LinphoneBuffer *linphone_iphone_file_transfer_send(LinphoneChatMessage *m
 		// when we cancel file transfer, this will automatically trigger NotDelivered callback... recalling ourself a
 		// second time so we have to unset message BEFORE calling this
 		linphone_chat_message_cancel_file_transfer(msg);
-#else
-		snrblabs_unref_mms(msg);
 #endif
 	}
 	_data = nil;

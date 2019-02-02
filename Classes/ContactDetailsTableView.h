@@ -46,5 +46,6 @@ typedef enum _ContactSections {
 #endif
 - (void)addEmailField:(NSString *)address;
 - (void)setContact:(Contact *)contact;
+@property (weak, nonatomic) UIView *waitView;
 
 @end

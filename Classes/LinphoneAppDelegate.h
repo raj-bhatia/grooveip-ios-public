@@ -19,13 +19,13 @@
 
 #import <UIKit/UIKit.h>
 #import <PushKit/PushKit.h>
-#import <AddressBookUI/ABPeoplePickerNavigationController.h>
 #import <AVFoundation/AVAudioSession.h>
 
 #import "LinphoneCoreSettingsStore.h"
 #import "ProviderDelegate.h"
 #import <UserNotifications/UserNotifications.h>
 #import <UserNotificationsUI/UserNotificationsUI.h>
+#import "PhoneMainView.h"
 
 @interface LinphoneAppDelegate : NSObject <UIApplicationDelegate, PKPushRegistryDelegate, UNUserNotificationCenterDelegate> {
     @private
@@ -33,16 +33,26 @@
     BOOL startedInBackground;
 }
 
-- (void)registerForNotifications:(UIApplication *)app;
+- (void)registerForNotifications;
 
 @property (nonatomic, retain) UIAlertController *waitingIndicator;
 @property (nonatomic, retain) NSString *configURL;
 @property (nonatomic, strong) UIWindow* window;
 @property PKPushRegistry* voipRegistry;
 @property ProviderDelegate *del;
+@property BOOL alreadyRegisteredForNotification;
 
+@property (class) BOOL appInBackground;
 @property (class) NSString *newDeviceToken;
 @property (class) NSString *pushNotificationCallId;
+@property (class) NSString *pushNotificationCallerId;
+@property (class) BOOL needToSendPNResponse;
+@property (class) NSString *callRoute;
+@property (class) long callStartTime;
+@property (class) long outgoingCallStartTime;
+@property (class) NSString *outgoingPhoneNumber;
+@property (class) UICompositeViewDescription *outgoingLastView;
+@property (class) NSTimer *outgoingTimer;
 @property (class) LinphoneRegistrationState registrationState;
 
 @end

@@ -17,7 +17,8 @@
 */
 
 #include "liblinphone_tester.h"
-#include "private.h"
+#include "tester_utils.h"
+#include <ctype.h>
 
 static const char XMLRPC_URL[] = "https://sip2.linphone.org:446/xmlrpc.php";
 
@@ -61,8 +62,9 @@ static void local_username_too_short(void) {
 		LinphoneAccountCreatorUsernameStatus,
 		"%i");
 
-	linphone_account_creator_unref(creator);
+	
 	linphone_core_manager_destroy(marie);
+	linphone_account_creator_unref(creator);
 }
 
 static void local_username_too_long(void) {
@@ -338,6 +340,20 @@ static void account_creator_cb(LinphoneAccountCreator *creator, LinphoneAccountC
 	account_creator_set_cb_done(cbs);
 }
 
+static void set_string(char **dest, const char *src, bool_t lowercase) {
+	if (*dest) {
+		ms_free(*dest);
+		*dest = NULL;
+	}
+	if (src) {
+		*dest = ms_strdup(src);
+		if (lowercase) {
+			char *cur = *dest;
+			for (; *cur; cur++) *cur = tolower(*cur);
+		}
+	}
+}
+
 static void _get_activation_code_cb(LinphoneXmlRpcRequest *request) {
 	LinphoneAccountCreator *creator = (LinphoneAccountCreator *)linphone_xml_rpc_request_get_user_data(request);
 	LinphoneAccountCreatorStatus status = LinphoneAccountCreatorStatusRequestFailed;
@@ -359,12 +375,10 @@ LinphoneAccountCreatorStatus get_activation_code_account_cb(LinphoneAccountCreat
 		return LinphoneAccountCreatorStatusMissingArguments;
 	}
 
-	request = linphone_xml_rpc_request_new_with_args(LinphoneXmlRpcArgString, "get_confirmation_key",
-			LinphoneXmlRpcArgString, creator->username ? creator->username : creator->phone_number,
-			LinphoneXmlRpcArgString, creator->password,
-			LinphoneXmlRpcArgString, linphone_proxy_config_get_domain(creator->proxy_cfg),
-			LinphoneXmlRpcArgNone);
-
+	request = linphone_xml_rpc_request_new(LinphoneXmlRpcArgString, "get_confirmation_key");
+	linphone_xml_rpc_request_add_string_arg(request, creator->username ? creator->username : creator->phone_number);
+	linphone_xml_rpc_request_add_string_arg(request, creator->password);
+	linphone_xml_rpc_request_add_string_arg(request, linphone_proxy_config_get_domain(creator->proxy_cfg));
 	linphone_xml_rpc_request_set_user_data(request, creator);
 	linphone_xml_rpc_request_cbs_set_response(linphone_xml_rpc_request_get_callbacks(request), _get_activation_code_cb);
 	linphone_xml_rpc_session_send_request(creator->xmlrpc_session, request);
@@ -397,12 +411,10 @@ LinphoneAccountCreatorStatus delete_account_cb(LinphoneAccountCreator *creator) 
 		return LinphoneAccountCreatorStatusMissingArguments;
 	}
 
-	request = linphone_xml_rpc_request_new_with_args(LinphoneXmlRpcArgString, "delete_account",
-			LinphoneXmlRpcArgString, creator->username ? creator->username : creator->phone_number,
-			LinphoneXmlRpcArgString, creator->password,
-			LinphoneXmlRpcArgString, linphone_proxy_config_get_domain(creator->proxy_cfg),
-			LinphoneXmlRpcArgNone);
-
+	request = linphone_xml_rpc_request_new(LinphoneXmlRpcArgString, "delete_account");
+	linphone_xml_rpc_request_add_string_arg(request, creator->username ? creator->username : creator->phone_number);
+	linphone_xml_rpc_request_add_string_arg(request, creator->password);
+	linphone_xml_rpc_request_add_string_arg(request, linphone_proxy_config_get_domain(creator->proxy_cfg));
 	linphone_xml_rpc_request_set_user_data(request, creator);
 	linphone_xml_rpc_request_cbs_set_response(linphone_xml_rpc_request_get_callbacks(request), _delete_account_cb);
 	linphone_xml_rpc_session_send_request(creator->xmlrpc_session, request);

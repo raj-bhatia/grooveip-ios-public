@@ -25,3 +25,7 @@ lcb_git_tag_latest("master")
 lcb_git_tag("1.0.2")
 lcb_external_source_paths("bcg729")
 lcb_groupable(YES)
+lcb_sanitizable(YES)
+lcb_package_source(YES)
+lcb_spec_file("bcg729.spec")
+

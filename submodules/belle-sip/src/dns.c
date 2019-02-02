@@ -112,12 +112,18 @@
 #include <resolv.h>
 #endif
 
+#if defined(HAVE_RESINIT)
+#include <net/if.h>
+#include <ifaddrs.h>
+#endif
+
 #ifdef __ANDROID__
 #include <sys/system_properties.h>
 #endif
 
 #include <bctoolbox/port.h>
 #include <bctoolbox/defs.h>
+#include <belle-sip/utils.h>
 
 /*
  * C O M P I L E R  V E R S I O N  &  F E A T U R E  D E T E C T I O N
@@ -810,9 +816,9 @@ static size_t dns_af_len(int af) {
 	return table[af];
 } /* dns_af_len() */
 
-#define dns_sa_family(sa)	(((struct sockaddr_storage *)(sa))->ss_family)
+#define dns_sa_family(sa) (((struct sockaddr_storage *)(sa))->ss_family)
 
-#define dns_sa_len(sa)		dns_af_len(dns_sa_family(sa))
+#define dns_sa_len(sa) dns_af_len(dns_sa_family(sa))
 
 
 #define DNS_SA_NOPORT	&dns_sa_noport
@@ -4942,22 +4948,22 @@ int dns_resconf_loadwin(struct dns_resolv_conf *resconf) {
 	FIXED_INFO *pFixedInfo;
 	ULONG ulOutBufLen;
 	DWORD dwRetVal;
-    IP_ADDR_STRING *pIPAddr;
+	IP_ADDR_STRING *pIPAddr;
 	unsigned sa_count = 0;
 	int error;
 
 	pFixedInfo = (FIXED_INFO *) malloc(sizeof(FIXED_INFO));
-    if (pFixedInfo == NULL) {
-        return -1;
-    }
-    ulOutBufLen = sizeof(FIXED_INFO);
+	if (pFixedInfo == NULL) {
+		return -1;
+	}
+	ulOutBufLen = sizeof(FIXED_INFO);
 	if (GetNetworkParams(pFixedInfo, &ulOutBufLen) == ERROR_BUFFER_OVERFLOW) {
-        free(pFixedInfo);
-        pFixedInfo = (FIXED_INFO *) malloc(ulOutBufLen);
-        if (pFixedInfo == NULL) {
-            return -1;
-        }
-    }
+		free(pFixedInfo);
+		pFixedInfo = (FIXED_INFO *) malloc(ulOutBufLen);
+		if (pFixedInfo == NULL) {
+			return -1;
+		}
+	}
 
 	if ((dwRetVal = GetNetworkParams(pFixedInfo, &ulOutBufLen)) == NO_ERROR) {
 		memset(resconf->search, '\0', sizeof resconf->search);
@@ -5001,10 +5007,43 @@ int dns_resconf_loadandroid(struct dns_resolv_conf *resconf) {
 #endif
 
 #ifdef HAVE_RESINIT
+
+static int guess_scope_id(void){
+	struct ifaddrs *ifp;
+	struct ifaddrs *ifpstart;
+	int scope_id = -1;
+	
+	if (getifaddrs(&ifpstart) < 0) {
+		return -1;
+	}
+#ifndef __linux
+	#define UP_FLAG IFF_UP /* interface is up */
+#else
+	#define UP_FLAG IFF_RUNNING /* resources allocated */
+#endif
+
+	for (ifp = ifpstart; ifp != NULL; ifp = ifp->ifa_next) {
+		if (ifp->ifa_addr && ifp->ifa_addr->sa_family == AF_INET6
+			&& (ifp->ifa_flags & UP_FLAG) && !(ifp->ifa_flags & IFF_LOOPBACK))
+		{
+			struct sockaddr_in6 *in6 = (struct sockaddr_in6*)ifp->ifa_addr;
+			if (in6->sin6_addr.__u6_addr.__u6_addr16[0] == 0x80fe){
+				scope_id =  in6->sin6_scope_id;
+				belle_sip_warning("Best guess for scope id is %i", scope_id);
+				break;
+			}
+		}
+	}
+	freeifaddrs(ifpstart);
+	
+	return scope_id;
+}
+
 int dns_resconf_loadfromresolv(struct dns_resolv_conf *resconf) {
 	struct __res_state res;
 	union res_sockaddr_union addresses[3];
-	int i,error;
+	int i,error,write_index;
+
 
 	if ((error = res_ninit(&res))) {
 		return error;
@@ -5012,8 +5051,25 @@ int dns_resconf_loadfromresolv(struct dns_resolv_conf *resconf) {
 
 	error=res_getservers(&res,addresses,3);
 	if (error>0){
-		for (i = 0; i<error ; i++ ) {
-			memcpy(&resconf->nameserver[i],&addresses[i],sizeof(union res_sockaddr_union));
+		for (i = 0,write_index=0; i<error ; i++ ) {
+
+			if (	(addresses[i].sin.sin_family == AF_INET6)
+				&&	(addresses[i].sin6.sin6_addr.__u6_addr.__u6_addr16[0] == 0x80fe) /*local link*/
+				&&	(addresses[i].sin6.sin6_scope_id == 0) ) {
+				char ip[32];
+				int scope_id;
+				bctbx_sockaddr_to_printable_ip_address((struct sockaddr*)&addresses[i].sin6, sizeof(struct sockaddr),ip, sizeof (ip));
+				belle_sip_warning("DNS entry [%s] has no scope id, will try to guess it.",ip);
+				scope_id = guess_scope_id();
+				if (scope_id == 0){
+					belle_sip_error("Could not guess the scope id, dns server [%s] cannot be used.", ip);
+				}else{
+					addresses[i].sin6.sin6_scope_id = scope_id;
+					memcpy(&resconf->nameserver[write_index++],&addresses[i],sizeof(union res_sockaddr_union));
+				}
+			} else {
+				memcpy(&resconf->nameserver[write_index++],&addresses[i],sizeof(union res_sockaddr_union));
+			}
 		}
 		error=0;
 	}else error=-1;
@@ -6794,7 +6850,7 @@ retry:
 			if (memcmp(&tmp_ss, &so->remote, tmp_ss_len) != 0){
 				so->ip_differ = 1;
 			}
-			
+
 		}
 
 		so->stat.udp.rcvd.bytes += n;
@@ -7725,8 +7781,12 @@ exec:
 				|| error == DNS_ECONNRESET
 				|| error == EINVAL
 				|| error == DNS_EHOSTUNREACH) { /* maybe even more case*/
+				char remote_sock[64];
+				struct sockaddr *addr = (struct sockaddr*)&R->so.remote;
+				bctbx_sockaddr_to_printable_ip_address(addr, dns_sa_len(addr), remote_sock, sizeof(remote_sock));
+				belle_sip_error("Cannot reach [%s] because [%s]", remote_sock, strerror(error));
 				dgoto(R->sp, DNS_R_FOREACH_A);
-			}else goto error;
+			} else goto error;
 		}
 		if (!dns_p_setptr(&F->answer, dns_so_fetch(&R->so, &error)))
 			goto error;

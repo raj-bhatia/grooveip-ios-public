@@ -1,6 +1,6 @@
 ############################################################################
 # tunnel.cmake
-# Copyright (C) 2014  Belledonne Communications, Grenoble France
+# Copyright (C) 2014-2018  Belledonne Communications, Grenoble France
 #
 ############################################################################
 #
@@ -22,12 +22,11 @@
 
 lcb_git_repository("gitosis@git.linphone.org:tunnel.git")
 lcb_git_tag_latest("master")
-lcb_git_tag("6670f3448bbf7260ea0681745db0397d70bd503c")
+lcb_git_tag("5d8582208f37174ded18280c7c1f8feefb1c4c55")
 lcb_external_source_paths("tunnel")
 lcb_groupable(YES)
+lcb_sanitizable(YES)
 
-if(LINPHONE_BUILDER_BUILD_DEPENDENCIES)
-	lcb_dependencies("bctoolbox")
-endif()
-
+lcb_dependencies("bctoolbox")
 lcb_cmake_options("-DENABLE_SERVERS=NO")
+

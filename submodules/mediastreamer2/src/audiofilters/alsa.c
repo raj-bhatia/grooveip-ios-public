@@ -50,7 +50,7 @@ then try incrementing the number of periods*/
 having sound quality trouble:*/
 /*#define EPIPE_BUGFIX 1*/
 
-static MSSndCard * alsa_card_new(const char *id, const char *pcmbasename);
+static MSSndCard * alsa_card_new(const char *pcmname, int cardindex, const char *card_name);
 static MSSndCard *alsa_card_duplicate(MSSndCard *obj);
 static MSFilter * ms_alsa_read_new(MSFactory *factory, const char *dev);
 static MSFilter * ms_alsa_write_new(MSFactory *factory, const char *dev);
@@ -617,10 +617,10 @@ static MSFilter *alsa_card_create_writer(MSSndCard *card)
 
 
 void alsa_error_log_handler(const char *file, int line, const char *function, int err, const char *fmt, ...) {
-	char * format = ms_strdup_printf("also error in %s:%d - %s", file, line, fmt);
+	char * format = ms_strdup_printf("alsa error in %s:%d - %s", file, line, fmt);
 	va_list args;
 	va_start (args, fmt);
-	ortp_logv(ORTP_LOG_DOMAIN, ORTP_MESSAGE, format, args);
+	bctbx_logv(BCTBX_LOG_DOMAIN, BCTBX_LOG_MESSAGE, format, args);
 	va_end (args);
 	ms_free(format);
 }
@@ -639,103 +639,37 @@ static void alsa_card_uninit(MSSndCard *obj){
 	ms_free(ad);
 }
 
+/*
+ * Getting the list of available pcm devices with alsa library is a nightmare.
+ * Actually I found no official way of doing it.
+ * The following code enumerates the card and uses the "sysdefault:<card index>" pcm identifier, which seems to work now on linux distribution.
+**/
+
 static void alsa_card_detect(MSSndCardManager *m){
-	int i,j,k;
-	void **hints=NULL;
-	int hint_device_count=0;
-	int device_count=0;
-	const char *pcm_base_name = "plug";
-	bool_t found_duplicate;
-	const int MAX_NUM_DEVICE_ID = 100;
-	const int MAX_PLUG_NAME_CHARS = 50;
-	char *plug_names[MAX_NUM_DEVICE_ID];
-	char *card_names[MAX_NUM_DEVICE_ID], *device_names[MAX_NUM_DEVICE_ID];
-	char *unique_card_names[MAX_NUM_DEVICE_ID], *unique_device_names[MAX_NUM_DEVICE_ID];
-
-	memset(plug_names, 0, sizeof(plug_names));
-
-	/* Get list of devices from alsa device hints */
-	if (snd_device_name_hint(-1, "pcm", &hints)==0){
-		for(i=0; hints[i]!=NULL; ++i){
-			char *hint = snd_device_name_get_hint(hints[i],"NAME");
-			char *hint_ptr = hint;
-			if (hint != NULL) {
-				char *device_name = strsep(&hint, ":");
-				if (device_name){
-					char *card_hint = strsep(&hint, ",");
-					if (card_hint){
-						if (strcmp(strsep(&card_hint, "="), "CARD")==0){
-							char *card_name = card_hint;
-							card_names[hint_device_count] = ms_strdup(card_name);
-							device_names[hint_device_count] = ms_strdup(device_name);
-							hint_device_count++;
-						}
-					}
-				}
-				free(hint_ptr);
+	int card_index = -1;
+	MSSndCard *card=NULL;
+	
+	/*
+	 * add the default alsa pcm device first
+	 */
+	card=alsa_card_new("default", -1, "default");
+	if (card) ms_snd_card_manager_add_card(m,card);
+	
+	while (snd_card_next(&card_index) == 0 && card_index != -1){
+		char *name = NULL;
+		char *longname = NULL;
+		if (snd_card_get_name(card_index, &name) == 0){
+			if (snd_card_get_longname(card_index, &longname) == 0){
+				ms_message("ALSA: found card with name [%s], long name [%s].", name, longname);
+				card = alsa_card_new("sysdefault", card_index, name);
+				if (card) ms_snd_card_manager_add_card(m,card);
+				free(longname);
 			}
-		}
-		snd_device_name_free_hint(hints);
-	}
-
-	/* Produce unique device_names[] */
-
-	for (j=0; j<hint_device_count; j++){
-		found_duplicate = FALSE;
-		if (j == 0){
-			unique_card_names[0] = card_names[0];
-			unique_device_names[0] = device_names[0];
-			plug_names[device_count] = (char*) ms_new(char, MAX_PLUG_NAME_CHARS);
-                        sprintf(plug_names[0],"%s:%s", device_names[0], card_names[0]);
-
-			device_count++;
-			continue;
-		}
-		for (k=0; k<device_count; k++){
-
-			if ( (strcmp(card_names[j], unique_card_names[k])==0) && (strcmp(device_names[j], unique_device_names[k])==0) ){
-				found_duplicate = TRUE;
-				break;
-			}
-		}
-		if ( !found_duplicate ){
-			unique_card_names[device_count] = card_names[j];
-			unique_device_names[device_count] = device_names[j];
-
-			plug_names[device_count] = (char*) ms_new(char,MAX_PLUG_NAME_CHARS);
-			sprintf(plug_names[device_count],"%s:%s", device_names[j], card_names[j]);
-
-			device_count++;
+			free(name);
 		}
 	}
-
-	/* Add unique devices to card manager */
-
-	for (i=-1;i<device_count;i++){
-		MSSndCard *card=NULL;
-		if (i==-1){
-			card=alsa_card_new("default", pcm_base_name);
-		}
-		else {
-			// Currently, only 'default' devices are supported.
-			if (strcmp(unique_device_names[i], "default")==0) {
-				card=alsa_card_new(plug_names[i], pcm_base_name);
-			}
-		}
-
-		if (card!=NULL)
-		{
-			ms_snd_card_manager_add_card(m,card);
-		}
-	}
-
+	/*This is to avoid thousands of memory leaks left by the alsa library, painful for debugging with valgrind.*/
 	atexit((void(*)(void))snd_config_update_free_global);
-
-	for (i=0; i<hint_device_count; i++) {
-		if (plug_names[i]) ms_free(plug_names[i]);
-		ms_free(device_names[i]);
-		ms_free(card_names[i]);
-	}
 }
 
 MSSndCardDesc alsa_card_desc={
@@ -775,72 +709,62 @@ MSSndCard * ms_alsa_card_new_custom(const char *pcmdev, const char *mixdev){
 	return obj;
 }
 
-static char *get_card_name(snd_pcm_t *handle, unsigned int *card_index_ret){
+/*
+static char *get_card_name(snd_pcm_t *handle){
 	snd_pcm_info_t *info=NULL;
-	unsigned int card_index=-1;
 	char *ret = NULL;
 
 	snd_pcm_info_malloc(&info);
 	if (snd_pcm_info(handle, info)==0){
-		card_index = snd_pcm_info_get_card(info);
-	}
-	snd_pcm_info_free(info);
-	if (card_index != (unsigned int) -1){
-		char *name=NULL;
-		*card_index_ret = card_index;
-		snd_card_get_name(card_index, &name);
+		const char *name = snd_pcm_info_get_subdevice_name(info);
 		if (name){
-			/* remove trailing spaces from card name */
-			char *pos2;
-			ret =ms_strdup(name);
-			pos2 = ret + strlen(ret) - 1;
-			for (; pos2>name && *pos2==' '; pos2--) *pos2='\0';
-			free(name);
+			ret = ms_strdup(name);
 		}
 	}
+	snd_pcm_info_free(info);
 	if (!ret) ret = ms_strdup("default");
 	return ret;
-}
+}*/
 
-static unsigned int get_card_capabilities(const char *devname, char **card_name, unsigned int *card_index){
+static unsigned int get_card_capabilities(const char *devname){
 	snd_pcm_t *pcm_handle;
 	unsigned int ret = 0;
 
-	*card_name = NULL;
+	/**card_name = NULL;*/
 	if (snd_pcm_open(&pcm_handle,devname,SND_PCM_STREAM_CAPTURE,SND_PCM_NONBLOCK)==0) {
-		*card_name = get_card_name(pcm_handle, card_index);
+		/**card_name = get_card_name(pcm_handle);*/
 		ret|=MS_SND_CARD_CAP_CAPTURE;
 		snd_pcm_close(pcm_handle);
 	}
 	if (snd_pcm_open(&pcm_handle,devname,SND_PCM_STREAM_PLAYBACK,SND_PCM_NONBLOCK)==0) {
-		if (*card_name == NULL) *card_name = get_card_name(pcm_handle, card_index);
+		/*if (*card_name == NULL) *card_name = get_card_name(pcm_handle);*/
 		ret|=MS_SND_CARD_CAP_PLAYBACK;
 		snd_pcm_close(pcm_handle);
 	}
 	return ret;
 }
 
-static MSSndCard * alsa_card_new(const char *id, const char *pcmbasename){
+static MSSndCard * alsa_card_new(const char *pcm_name, int card_index, const char *card_name){
 	MSSndCard * obj;
 	AlsaData *ad;
-	unsigned int hw_index=0;
 
 	obj=ms_snd_card_new(&alsa_card_desc);
 	ad=(AlsaData*)obj->data;
-	if (strcmp(id,"default")==0) {
+	obj->name = ms_strdup(card_name);
+	if (strcmp(pcm_name,"default")==0) {
 		/* the default pcm device */
-		obj->name=ms_strdup("default device");
 		ad->pcmdev=ms_strdup("default");
 		ad->mixdev=ms_strdup("default");
+		obj->capabilities = get_card_capabilities(ad->pcmdev);
 	}else{
 		snd_mixer_t *mixer;
-		ad->pcmdev=ms_strdup_printf("%s:%s",pcmbasename, id);
-		obj->capabilities = get_card_capabilities(ad->pcmdev, &obj->name, &hw_index);
+		ad->pcmdev=ms_strdup_printf("%s:%i",pcm_name, card_index);
+		obj->capabilities = get_card_capabilities(ad->pcmdev);
 		if (obj->capabilities == 0){
 			ms_snd_card_destroy(obj);
 			return NULL;
 		}
-		ad->mixdev=ms_strdup_printf("hw:%i",hw_index);
+		ad->mixdev=ms_strdup_printf("hw:%i",card_index);
 		mixer = alsa_mixer_open(ad->mixdev);
 		if (!mixer) ms_warning("Fail to get a mixer for device %s", ad->mixdev);
 		else alsa_mixer_close(mixer);
@@ -970,18 +894,6 @@ static void alsa_stop_r(AlsaReadData *d){
 }
 #endif
 
-static void compute_timespec(AlsaReadData *d) {
-	static int count = 0;
-	uint64_t ns = ((1000 * d->read_samples) / (uint64_t) d->rate) * 1000000;
-	double av_skew;
-	MSTimeSpec ts;
-	ts.tv_nsec = ns % 1000000000;
-	ts.tv_sec = ns / 1000000000;
-	av_skew = ms_ticker_synchronizer_set_external_time(d->ticker_synchronizer, &ts);
-	if ((++count) % 100 == 0)
-		ms_message("sound/wall clock skew is average=%f ms", av_skew);
-}
-
 void alsa_read_preprocess(MSFilter *obj){
 #ifdef THREADED_VERSION
 	AlsaReadData *ad=(AlsaReadData*)obj->data;
@@ -995,7 +907,7 @@ void alsa_read_postprocess(MSFilter *obj){
 #ifdef THREADED_VERSION
 	alsa_stop_r(ad);
 #endif
-	ms_ticker_set_time_func(obj->ticker,NULL,NULL);
+	ms_ticker_set_synchronizer(obj->ticker, NULL);
 	if (ad->handle!=NULL) snd_pcm_close(ad->handle);
 	ad->read_started=FALSE;
 	ad->handle=NULL;
@@ -1027,7 +939,7 @@ void alsa_read_process(MSFilter *obj){
 		ad->handle=alsa_open_r(ad->pcmdev,16,ad->nchannels==2,ad->rate);
 		if (ad->handle){
 			ad->read_samples=0;
-			ms_ticker_set_time_func(obj->ticker,(uint64_t (*)(void*))ms_ticker_synchronizer_get_corrected_time, ad->ticker_synchronizer);
+			ms_ticker_set_synchronizer(obj->ticker, ad->ticker_synchronizer);
 		}
 	}
 	if (ad->handle==NULL) return;
@@ -1043,7 +955,7 @@ void alsa_read_process(MSFilter *obj){
 		ad->read_samples+=err;
 		size=err*2*ad->nchannels;
 		om->b_wptr+=size;
-		compute_timespec(ad);
+		ms_ticker_synchronizer_update(ad->ticker_synchronizer, ad->read_samples, (unsigned int)ad->rate);
 
 		/*ms_message("alsa_read_process: Outputing %i bytes",size);*/
 		ms_queue_put(obj->outputs[0],om);

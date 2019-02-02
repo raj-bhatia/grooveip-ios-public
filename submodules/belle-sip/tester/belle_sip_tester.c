@@ -35,6 +35,7 @@ static FILE * log_file = NULL;
 static belle_sip_object_pool_t *pool;
 
 static int leaked_objects_count;
+const char *userhostsfile = NULL;
 
 static int _belle_sip_tester_ipv6_available(void){
 	struct addrinfo *ai=bctbx_ip_address_to_addrinfo(AF_INET6,SOCK_STREAM,"2a01:e00::2",53);
@@ -88,7 +89,7 @@ static void log_handler(int lev, const char *fmt, va_list args) {
 
 void belle_sip_tester_init(void(*ftester_printf)(int level, const char *fmt, va_list args)) {
 	if (ftester_printf == NULL) ftester_printf = log_handler;
-	bc_tester_init(ftester_printf, BELLE_SIP_LOG_MESSAGE, BELLE_SIP_LOG_ERROR, NULL);
+	bc_tester_init(ftester_printf, BELLE_SIP_LOG_MESSAGE, BELLE_SIP_LOG_ERROR, "tester_hosts");
 	belle_sip_init_sockets();
 	belle_sip_object_enable_marshal_check(TRUE);
 	ipv6_available=_belle_sip_tester_ipv6_available();
@@ -173,7 +174,6 @@ int belle_sip_tester_set_log_file(const char *filename) {
 	belle_sip_message("Redirecting traces to file [%s]", filename);
 	filehandler = bctbx_create_file_log_handler(0, dir, base, log_file);
 	bctbx_add_log_handler(filehandler);
-	bctbx_add_log_handler(filehandler);
 	if (dir) bctbx_free(dir);
 	if (base) bctbx_free(base);
 	return 0;
@@ -188,14 +188,16 @@ static const char* belle_sip_helper =
 		"\t\t\t--log-file <output log file path>\n"
 		"\t\t\t--domain <test sip domain>\n"
 		"\t\t\t--auth-domain <test auth domain>\n"
-		"\t\t\t--root-ca <root ca file path>\n";
+		"\t\t\t--root-ca <root ca file path>\n"
+		"\t\t\t--dns-hosts </etc/hosts -like file to used to override DNS names (default: tester_hosts)>\n";
 
 int main (int argc, char *argv[]) {
 	int i;
 	int ret;
 	const char *root_ca_path = NULL;
 	const char *env_domain=getenv("TEST_DOMAIN");
-
+	char *default_hosts = NULL;
+	
 	belle_sip_tester_init(NULL);
 
 #ifndef _WIN32   /*this hack doesn't work for argv[0]="c:\blablab\"*/
@@ -224,6 +226,7 @@ int main (int argc, char *argv[]) {
 			bctbx_set_log_level(BCTBX_LOG_DOMAIN,BCTBX_LOG_FATAL);
 		} else if (strcmp(argv[i],"--log-file")==0){
 			CHECK_ARG("--log-file", ++i, argc);
+			bctbx_set_log_handler(NULL);/*remove default log handler*/
 			if (belle_sip_tester_set_log_file(argv[i]) < 0) return -2;
 		} else if (strcmp(argv[i],"--domain")==0){
 			CHECK_ARG("--domain", ++i, argc);
@@ -234,6 +237,9 @@ int main (int argc, char *argv[]) {
 		} else if (strcmp(argv[i], "--root-ca") == 0) {
 			CHECK_ARG("--root-ca", ++i, argc);
 			root_ca_path = argv[i];
+		}else if (strcmp(argv[i],"--dns-hosts")==0){
+			CHECK_ARG("--dns-hosts", ++i, argc);
+			userhostsfile=argv[i];
 		}else {
 			int ret = bc_tester_parse_args(argc, argv, i);
 			if (ret>0) {
@@ -251,6 +257,7 @@ int main (int argc, char *argv[]) {
 	ret = bc_tester_start(argv[0]);
 	belle_sip_tester_uninit();
 	bctbx_uninit_logger();
+	if (default_hosts) bc_free(default_hosts);
 	return ret;
 }
 

@@ -18,15 +18,17 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
 #include "linphone/core.h"
-#include "private.h"
 #include "linphone/lpconfig.h"
 #include "linphone/presence.h"
 
+#include "c-wrapper/c-wrapper.h"
 
+// TODO: From coreapi. Remove me later.
+#include "private.h"
+
+using namespace LinphonePrivate;
 
 extern const char *__policy_enum_to_str(LinphoneSubscribePolicy pol);
-
-
 
 struct _LinphonePresenceNote {
 	belle_sip_object_t base;
@@ -124,6 +126,10 @@ static void presence_note_uninit(LinphonePresenceNote *note) {
 	}
 }
 
+static void presence_note_unref(void *note) {
+	linphone_presence_note_unref((LinphonePresenceNote *)note);
+}
+
 static LinphonePresenceService * presence_service_new(const char *id, LinphonePresenceBasicStatus status) {
 	LinphonePresenceService *service = belle_sip_object_new(LinphonePresenceService);
 	if (id != NULL) {
@@ -141,9 +147,13 @@ static void presence_service_uninit(LinphonePresenceService *service) {
 	if (service->contact != NULL) {
 		ms_free(service->contact);
 	}
-	bctbx_list_for_each(service->notes, (MSIterateFunc)linphone_presence_note_unref);
+	bctbx_list_for_each(service->notes, presence_note_unref);
 	bctbx_list_free(service->notes);
 };
+
+static void presence_service_unref(void *service) {
+	linphone_presence_service_unref((LinphonePresenceService *)service);
+}
 
 static void presence_service_set_timestamp(LinphonePresenceService *service, time_t timestamp) {
 	service->timestamp = timestamp;
@@ -157,6 +167,10 @@ static void presence_activity_uninit(LinphonePresenceActivity *activity) {
 	if (activity->description != NULL) {
 		ms_free(activity->description);
 	}
+}
+
+static void presence_activity_unref(void *activity) {
+	linphone_presence_activity_unref((LinphonePresenceActivity *)activity);
 }
 
 static time_t parse_timestamp(const char *timestamp) {
@@ -217,12 +231,16 @@ static void presence_person_uninit(LinphonePresencePerson *person) {
 	if (person->id != NULL) {
 		ms_free(person->id);
 	}
-	bctbx_list_for_each(person->activities, (MSIterateFunc)linphone_presence_activity_unref);
+	bctbx_list_for_each(person->activities, presence_activity_unref);
 	bctbx_list_free(person->activities);
-	bctbx_list_for_each(person->activities_notes, (MSIterateFunc)linphone_presence_note_unref);
+	bctbx_list_for_each(person->activities_notes, presence_note_unref);
 	bctbx_list_free(person->activities_notes);
-	bctbx_list_for_each(person->notes, (MSIterateFunc)linphone_presence_note_unref);
+	bctbx_list_for_each(person->notes, presence_note_unref);
 	bctbx_list_free(person->notes);
+}
+
+static void presence_person_unref(void *person) {
+	linphone_presence_person_unref((LinphonePresencePerson *)person);
 }
 
 static void presence_person_add_activities_note(LinphonePresencePerson *person, LinphonePresenceNote *note) {
@@ -254,11 +272,11 @@ static void presence_model_find_open_basic_status(LinphonePresenceService *servi
 static void presence_model_uninit(LinphonePresenceModel *model) {
 	if (model->presentity)
 		linphone_address_unref(model->presentity);
-	bctbx_list_for_each(model->services, (MSIterateFunc)linphone_presence_service_unref);
+	bctbx_list_for_each(model->services, presence_service_unref);
 	bctbx_list_free(model->services);
-	bctbx_list_for_each(model->persons, (MSIterateFunc)linphone_presence_person_unref);
+	bctbx_list_for_each(model->persons, presence_person_unref);
 	bctbx_list_free(model->persons);
-	bctbx_list_for_each(model->notes, (MSIterateFunc)linphone_presence_note_unref);
+	bctbx_list_for_each(model->notes, presence_note_unref);
 	bctbx_list_free(model->notes);
 }
 
@@ -355,6 +373,7 @@ LinphoneStatus linphone_presence_model_set_contact(LinphonePresenceModel *model,
 		service = linphone_presence_service_new(NULL, LinphonePresenceBasicStatusClosed, NULL);
 		if (service == NULL) return -1;
 		linphone_presence_model_add_service(model, service);
+		linphone_presence_service_unref(service);
 	}
 	return linphone_presence_service_set_contact(service, contact);
 }
@@ -373,7 +392,7 @@ static void presence_model_get_activity(const LinphonePresencePerson *person, st
 	if (st->current_idx != (unsigned)-1) {
 		unsigned int size = (unsigned int)bctbx_list_size(person->activities);
 		if (st->requested_idx < (st->current_idx + size)) {
-			st->activity = (LinphonePresenceActivity *)bctbx_list_nth_data(person->activities, st->requested_idx - st->current_idx);
+			st->activity = (LinphonePresenceActivity *)bctbx_list_nth_data(person->activities, (int)(st->requested_idx - st->current_idx));
 			st->current_idx = (unsigned)-1;
 		} else {
 			st->current_idx += size;
@@ -443,10 +462,14 @@ LinphoneStatus linphone_presence_model_add_activity(LinphonePresenceModel *model
 	return 0;
 }
 
+static void presence_person_clear_activities(void *person) {
+	linphone_presence_person_clear_activities((LinphonePresencePerson *)person);
+}
+
 LinphoneStatus linphone_presence_model_clear_activities(LinphonePresenceModel *model) {
 	if (model == NULL) return -1;
 
-	bctbx_list_for_each(model->persons, (MSIterateFunc)linphone_presence_person_clear_activities);
+	bctbx_list_for_each(model->persons, presence_person_clear_activities);
 	return 0;
 }
 
@@ -553,7 +576,7 @@ LinphoneStatus linphone_presence_model_add_note(LinphonePresenceModel *model, co
 		return -1;
 
 	/* Will put the note in the first service. */
-	service = bctbx_list_nth_data(model->services, 0);
+	service = reinterpret_cast<LinphonePresenceService *>(bctbx_list_nth_data(model->services, 0));
 	if (service == NULL) {
 		/* If no service exists, create one. */
 		service = presence_service_new(generate_presence_id(), LinphonePresenceBasicStatusClosed);
@@ -577,16 +600,16 @@ LinphoneStatus linphone_presence_model_add_note(LinphonePresenceModel *model, co
 }
 
 static void clear_presence_person_notes(LinphonePresencePerson *person) {
-	bctbx_list_for_each(person->activities_notes, (MSIterateFunc)linphone_presence_note_unref);
+	bctbx_list_for_each(person->activities_notes, presence_note_unref);
 	bctbx_list_free(person->activities_notes);
 	person->activities_notes = NULL;
-	bctbx_list_for_each(person->notes, (MSIterateFunc)linphone_presence_note_unref);
+	bctbx_list_for_each(person->notes, presence_note_unref);
 	bctbx_list_free(person->notes);
 	person->notes = NULL;
 }
 
 static void clear_presence_service_notes(LinphonePresenceService *service) {
-	bctbx_list_for_each(service->notes, (MSIterateFunc)linphone_presence_note_unref);
+	bctbx_list_for_each(service->notes, presence_note_unref);
 	bctbx_list_free(service->notes);
 	service->notes = NULL;
 }
@@ -597,7 +620,7 @@ LinphoneStatus linphone_presence_model_clear_notes(LinphonePresenceModel *model)
 
 	bctbx_list_for_each(model->persons, (MSIterateFunc)clear_presence_person_notes);
 	bctbx_list_for_each(model->services, (MSIterateFunc)clear_presence_service_notes);
-	bctbx_list_for_each(model->notes, (MSIterateFunc)linphone_presence_note_unref);
+	bctbx_list_for_each(model->notes, presence_note_unref);
 	bctbx_list_free(model->notes);
 	model->notes = NULL;
 
@@ -621,7 +644,7 @@ LinphonePresenceService * linphone_presence_model_get_nth_service(const Linphone
 	if ((model == NULL) || (idx >= linphone_presence_model_get_nb_services(model)))
 		return NULL;
 
-	return (LinphonePresenceService *)bctbx_list_nth_data(model->services, idx);
+	return (LinphonePresenceService *)bctbx_list_nth_data(model->services, (int)idx);
 }
 
 LinphoneStatus linphone_presence_model_add_service(LinphonePresenceModel *model, LinphonePresenceService *service) {
@@ -633,7 +656,7 @@ LinphoneStatus linphone_presence_model_add_service(LinphonePresenceModel *model,
 LinphoneStatus linphone_presence_model_clear_services(LinphonePresenceModel *model) {
 	if (model == NULL) return -1;
 
-	bctbx_list_for_each(model->services, (MSIterateFunc)linphone_presence_service_unref);
+	bctbx_list_for_each(model->services, presence_service_unref);
 	bctbx_list_free(model->services);
 	model->services = NULL;
 	return 0;
@@ -647,7 +670,7 @@ LinphonePresencePerson * linphone_presence_model_get_nth_person(const LinphonePr
 	if ((model == NULL) || (idx >= linphone_presence_model_get_nb_persons(model)))
 		return NULL;
 
-	return (LinphonePresencePerson *)bctbx_list_nth_data(model->persons, idx);
+	return (LinphonePresencePerson *)bctbx_list_nth_data(model->persons, (int)idx);
 }
 
 LinphoneStatus linphone_presence_model_add_person(LinphonePresenceModel *model, LinphonePresencePerson *person) {
@@ -659,7 +682,7 @@ LinphoneStatus linphone_presence_model_add_person(LinphonePresenceModel *model, 
 LinphoneStatus linphone_presence_model_clear_persons(LinphonePresenceModel *model) {
 	if (model == NULL) return -1;
 
-	bctbx_list_for_each(model->persons, (MSIterateFunc)linphone_presence_person_unref);
+	bctbx_list_for_each(model->persons, presence_person_unref);
 	bctbx_list_free(model->persons);
 	model->persons = NULL;
 	return 0;
@@ -783,7 +806,7 @@ LinphonePresenceNote * linphone_presence_service_get_nth_note(const LinphonePres
 	if ((service == NULL) || (idx >= linphone_presence_service_get_nb_notes(service)))
 		return NULL;
 
-	return (LinphonePresenceNote *)bctbx_list_nth_data(service->notes, idx);
+	return (LinphonePresenceNote *)bctbx_list_nth_data(service->notes, (int)idx);
 }
 
 LinphoneStatus linphone_presence_service_add_note(LinphonePresenceService *service, LinphonePresenceNote *note) {
@@ -795,7 +818,7 @@ LinphoneStatus linphone_presence_service_add_note(LinphonePresenceService *servi
 LinphoneStatus linphone_presence_service_clear_notes(LinphonePresenceService *service) {
 	if (service == NULL) return -1;
 
-	bctbx_list_for_each(service->notes, (MSIterateFunc)linphone_presence_note_unref);
+	bctbx_list_for_each(service->notes, presence_note_unref);
 	bctbx_list_free(service->notes);
 	service->notes = NULL;
 	return 0;
@@ -844,7 +867,7 @@ unsigned int linphone_presence_person_get_nb_activities(const LinphonePresencePe
 LinphonePresenceActivity * linphone_presence_person_get_nth_activity(const LinphonePresencePerson *person, unsigned int idx) {
 	if ((person == NULL) || (idx >= linphone_presence_person_get_nb_activities(person)))
 		return NULL;
-	return (LinphonePresenceActivity *)bctbx_list_nth_data(person->activities, idx);
+	return (LinphonePresenceActivity *)bctbx_list_nth_data(person->activities, (int)idx);
 }
 
 LinphoneStatus linphone_presence_person_add_activity(LinphonePresencePerson *person, LinphonePresenceActivity *activity) {
@@ -856,7 +879,7 @@ LinphoneStatus linphone_presence_person_add_activity(LinphonePresencePerson *per
 
 LinphoneStatus linphone_presence_person_clear_activities(LinphonePresencePerson *person) {
 	if (person == NULL) return -1;
-	bctbx_list_for_each(person->activities, (MSIterateFunc)linphone_presence_activity_unref);
+	bctbx_list_for_each(person->activities, presence_activity_unref);
 	bctbx_list_free(person->activities);
 	person->activities = NULL;
 	return 0;
@@ -870,7 +893,7 @@ unsigned int linphone_presence_person_get_nb_notes(const LinphonePresencePerson 
 LinphonePresenceNote * linphone_presence_person_get_nth_note(const LinphonePresencePerson *person, unsigned int idx) {
 	if ((person == NULL) || (idx >= linphone_presence_person_get_nb_notes(person)))
 		return NULL;
-	return (LinphonePresenceNote *)bctbx_list_nth_data(person->notes, idx);
+	return (LinphonePresenceNote *)bctbx_list_nth_data(person->notes, (int)idx);
 }
 
 LinphoneStatus linphone_presence_person_add_note(LinphonePresencePerson *person, LinphonePresenceNote *note) {
@@ -881,7 +904,7 @@ LinphoneStatus linphone_presence_person_add_note(LinphonePresencePerson *person,
 
 LinphoneStatus linphone_presence_person_clear_notes(LinphonePresencePerson *person) {
 	if (person == NULL) return -1;
-	bctbx_list_for_each(person->notes, (MSIterateFunc)linphone_presence_note_unref);
+	bctbx_list_for_each(person->notes, presence_note_unref);
 	bctbx_list_free(person->notes);
 	person->notes = NULL;
 	return 0;
@@ -895,7 +918,7 @@ unsigned int linphone_presence_person_get_nb_activities_notes(const LinphonePres
 LinphonePresenceNote * linphone_presence_person_get_nth_activities_note(const LinphonePresencePerson *person, unsigned int idx) {
 	if ((person == NULL) || (idx >= linphone_presence_person_get_nb_activities_notes(person)))
 		return NULL;
-	return (LinphonePresenceNote *)bctbx_list_nth_data(person->activities_notes, idx);
+	return (LinphonePresenceNote *)bctbx_list_nth_data(person->activities_notes, (int)idx);
 }
 
 LinphoneStatus linphone_presence_person_add_activities_note(LinphonePresencePerson *person, LinphonePresenceNote *note) {
@@ -906,7 +929,7 @@ LinphoneStatus linphone_presence_person_add_activities_note(LinphonePresencePers
 
 LinphoneStatus linphone_presence_person_clear_activities_notes(LinphonePresencePerson *person) {
 	if (person == NULL) return -1;
-	bctbx_list_for_each(person->activities_notes, (MSIterateFunc)linphone_presence_note_unref);
+	bctbx_list_for_each(person->activities_notes, presence_note_unref);
 	bctbx_list_free(person->activities_notes);
 	person->activities_notes = NULL;
 	return 0;
@@ -994,7 +1017,7 @@ LinphonePresenceActivity * linphone_presence_activity_new(LinphonePresenceActivi
 char * linphone_presence_activity_to_string(const LinphonePresenceActivity *activity) {
 	LinphonePresenceActivityType acttype = linphone_presence_activity_get_type(activity);
 	const char *description = linphone_presence_activity_get_description(activity);
-	const char *acttype_str = acttype_str = presence_activity_type_to_string(acttype);
+	const char *acttype_str = presence_activity_type_to_string(acttype);
 	return ms_strdup_printf("%s%s%s", acttype_str,
 				(description == NULL) ? "" : ": ",
 				(description == NULL) ? "" : description);
@@ -1201,8 +1224,8 @@ static int process_pidf_xml_presence_service_notes(xmlparsing_context_t *xml_ctx
 	char xpath_str[MAX_XPATH_LENGTH];
 	xmlXPathObjectPtr note_object;
 	LinphonePresenceNote *note;
-	const char *note_str;
-	const char *lang;
+	char *note_str;
+	char *lang;
 	int i;
 
 	snprintf(xpath_str, sizeof(xpath_str), "%s[%i]/pidf:note", service_prefix, service_idx);
@@ -1231,10 +1254,10 @@ static int process_pidf_xml_presence_services(xmlparsing_context_t *xml_ctx, Lin
 	xmlXPathObjectPtr service_object;
 	xmlXPathObjectPtr pidfonline_object;
 	LinphonePresenceService *service;
-	const char *basic_status_str;
-	const char *service_id_str;
-	const char *timestamp_str;
-	const char *contact_str;
+	char *basic_status_str;
+	char *service_id_str;
+	char *timestamp_str;
+	char *contact_str;
 	LinphonePresenceBasicStatus basic_status;
 	int i;
 
@@ -1275,7 +1298,7 @@ static int process_pidf_xml_presence_services(xmlparsing_context_t *xml_ctx, Lin
 			if (service != NULL) {
 				if (timestamp_str != NULL) presence_service_set_timestamp(service, parse_timestamp(timestamp_str));
 				if (contact_str != NULL) linphone_presence_service_set_contact(service, contact_str);
-				process_pidf_xml_presence_service_notes(xml_ctx, service, i);
+				process_pidf_xml_presence_service_notes(xml_ctx, service, (unsigned int)i);
 				linphone_presence_model_add_service(model, service);
 				linphone_presence_service_unref(service);
 			}
@@ -1306,7 +1329,7 @@ static int process_pidf_xml_presence_person_activities(xmlparsing_context_t *xml
 	xmlXPathObjectPtr activities_object;
 	xmlNodePtr activity_node;
 	LinphonePresenceActivity *activity;
-	const char *description;
+	char *description;
 	int i, j;
 	int err = 0;
 
@@ -1321,7 +1344,7 @@ static int process_pidf_xml_presence_person_activities(xmlparsing_context_t *xml
 					activity_node = activities_object->nodesetval->nodeTab[j];
 					if ((activity_node->name != NULL) && (is_valid_activity_name((const char *)activity_node->name) == TRUE)) {
 						LinphonePresenceActivityType acttype;
-						description = (const char *)xmlNodeGetContent(activity_node);
+						description = (char *)xmlNodeGetContent(activity_node);
 						if ((description != NULL) && (description[0] == '\0')) {
 							linphone_free_xml_text_content(description);
 							description = NULL;
@@ -1348,8 +1371,8 @@ static int process_pidf_xml_presence_person_notes(xmlparsing_context_t *xml_ctx,
 	char xpath_str[MAX_XPATH_LENGTH];
 	xmlXPathObjectPtr note_object;
 	LinphonePresenceNote *note;
-	const char *note_str;
-	const char *lang;
+	char *note_str;
+	char *lang;
 	int i;
 
 	snprintf(xpath_str, sizeof(xpath_str), "%s[%i]/rpid:activities/rpid:note", person_prefix, person_idx);
@@ -1395,8 +1418,8 @@ static int process_pidf_xml_presence_persons(xmlparsing_context_t *xml_ctx, Linp
 	char xpath_str[MAX_XPATH_LENGTH];
 	xmlXPathObjectPtr person_object;
 	LinphonePresencePerson *person;
-	const char *person_id_str;
-	const char *person_timestamp_str;
+	char *person_id_str;
+	char *person_timestamp_str;
 	time_t timestamp;
 	int i;
 	int err = 0;
@@ -1415,9 +1438,9 @@ static int process_pidf_xml_presence_persons(xmlparsing_context_t *xml_ctx, Linp
 			person = presence_person_new(person_id_str, timestamp);
 
 			if (person != NULL) {
-				err = process_pidf_xml_presence_person_activities(xml_ctx, person, i);
+				err = process_pidf_xml_presence_person_activities(xml_ctx, person, (unsigned int)i);
 				if (err == 0) {
-					err = process_pidf_xml_presence_person_notes(xml_ctx, person, i);
+					err = process_pidf_xml_presence_person_notes(xml_ctx, person, (unsigned int)i);
 				}
 				if (err == 0) {
 					presence_model_add_person(model, person);
@@ -1435,7 +1458,7 @@ static int process_pidf_xml_presence_persons(xmlparsing_context_t *xml_ctx, Linp
 
 	if (err < 0) {
 		/* Remove all the persons added since there was an error. */
-		bctbx_list_for_each(model->persons, (MSIterateFunc)linphone_presence_person_unref);
+		bctbx_list_for_each(model->persons, presence_person_unref);
 	}
 	return err;
 }
@@ -1444,8 +1467,8 @@ static int process_pidf_xml_presence_notes(xmlparsing_context_t *xml_ctx, Linpho
 	char xpath_str[MAX_XPATH_LENGTH];
 	xmlXPathObjectPtr note_object;
 	LinphonePresenceNote *note;
-	const char *note_str;
-	const char *lang;
+	char *note_str;
+	char *lang;
 	int i;
 
 	note_object = linphone_get_xml_xpath_object_for_node_list(xml_ctx, "/pidf:presence/pidf:note");
@@ -1535,7 +1558,7 @@ void linphone_core_notify_all_friends(LinphoneCore *lc, LinphonePresenceModel *p
 	LinphoneFriendList *lfl = linphone_core_get_default_friend_list(lc);
 	ms_message("Notifying all friends that we are [%s]", activity_str);
 	if (activity_str != NULL) ms_free(activity_str);
-	
+
 	if (lfl) {
 		linphone_friend_list_notify_presence(lfl, presence);
 	} else {
@@ -1543,7 +1566,7 @@ void linphone_core_notify_all_friends(LinphoneCore *lc, LinphonePresenceModel *p
 	}
 }
 
-void linphone_subscription_new(LinphoneCore *lc, SalOp *op, const char *from){
+void linphone_subscription_new(LinphoneCore *lc, SalSubscribeOp *op, const char *from){
 	LinphoneFriend *lf=NULL;
 	char *tmp;
 	LinphoneAddress *uri;
@@ -1560,12 +1583,12 @@ void linphone_subscription_new(LinphoneCore *lc, SalOp *op, const char *from){
 			linphone_friend_add_incoming_subscription(lf, op);
 			lf->inc_subscribe_pending=TRUE;
 			if (lp_config_get_int(lc->config,"sip","notify_pending_state",0)) {
-				sal_notify_pending_state(op);
+				op->notifyPendingState();
 			}
-			sal_subscribe_accept(op);
+			op->accept();
 		} else {
 			ms_message("%s is not authorized to subscribe", from);
-			sal_subscribe_decline(op, SalReasonDeclined);
+			op->decline(SalReasonDeclined);
 		}
 		linphone_friend_done(lf);	/*this will do all necessary actions */
 	}else{
@@ -1573,14 +1596,14 @@ void linphone_subscription_new(LinphoneCore *lc, SalOp *op, const char *from){
 		if (linphone_find_friend_by_address(lc->subscribers,uri,&lf)){
 			if (lf->pol==LinphoneSPDeny){
 				ms_message("Rejecting %s because we already rejected it once.",from);
-				sal_subscribe_decline(op,SalReasonDeclined);
+				op->decline(SalReasonDeclined);
 			}
 			else {
 				/* else it is in wait for approval state, because otherwise it is in the friend list.*/
 				ms_message("New subscriber found in subscriber list, in %s state.",__policy_enum_to_str(lf->pol));
 			}
 		}else {
-			sal_subscribe_accept(op);
+			op->accept();
 			linphone_core_add_subscriber(lc,tmp,op);
 		}
 	}
@@ -1920,9 +1943,9 @@ end:
 void linphone_notify_recv(LinphoneCore *lc, SalOp *op, SalSubscribeStatus ss, SalPresenceModel *model){
 	char *tmp;
 	LinphoneFriend *lf = NULL;
-	const LinphoneAddress *friend=NULL;
+	const LinphoneAddress *lfa=NULL;
 	LinphonePresenceModel *presence;
-	
+
 	if (model != NULL) {
 		presence = (LinphonePresenceModel *)model;
 	} else {
@@ -1933,16 +1956,19 @@ void linphone_notify_recv(LinphoneCore *lc, SalOp *op, SalSubscribeStatus ss, Sa
 	if (linphone_core_get_default_friend_list(lc) != NULL)
 		lf=linphone_core_find_friend_by_out_subscribe(lc, op);
 	if (lf==NULL && lp_config_get_int(lc->config,"sip","allow_out_of_subscribe_presence",0)){
-		const SalAddress *addr=sal_op_get_from_address(op);
-		lf = linphone_core_find_friend(lc, (LinphoneAddress *)addr);
+		char *buf = sal_address_as_string_uri_only(op->getFromAddress());
+		LinphoneAddress *addr = linphone_address_new(buf);
+		lf = linphone_core_find_friend(lc, addr);
+		ms_free(buf);
+		linphone_address_unref(addr);
 	}
 	if (lf!=NULL){
 		LinphonePresenceActivity *activity = NULL;
 		char *activity_str;
 		activity = linphone_presence_model_get_activity(presence);
-		friend=linphone_friend_get_address(lf);
-		if (friend != NULL) {
-			tmp=linphone_address_as_string(friend);
+		lfa=linphone_friend_get_address(lf);
+		if (lfa != NULL) {
+			tmp=linphone_address_as_string(lfa);
 			if (activity == NULL) {
 				activity_str = linphone_presence_basic_status_to_string(linphone_presence_model_get_basic_status(presence));
 			} else {
@@ -1959,27 +1985,27 @@ void linphone_notify_recv(LinphoneCore *lc, SalOp *op, SalSubscribeStatus ss, Sa
 		linphone_core_notify_notify_presence_received(lc,(LinphoneFriend*)lf);
 		if (op != lf->outsub){
 			/*case of a NOTIFY received out of any dialog*/
-			sal_op_release(op);
+			op->release();
 			return;
 		}
 	}else{
 		ms_message("But this person is not part of our friend list, so we don't care.");
 		linphone_presence_model_unref(presence);
-		sal_op_release(op);
+		op->release();
 		return ;
 	}
 	if (ss==SalSubscribeTerminated){
 		if (lf){
 			if (lf->outsub != op){
-				sal_op_release(op);
+				op->release();
 			}
 			if (lf->outsub){
-				sal_op_release(lf->outsub);
+				lf->outsub->release();
 				lf->outsub=NULL;
 			}
 			lf->subscribe_active=FALSE;
 		}else{
-			sal_op_release(op);
+			op->release();
 		}
 	}
 }
@@ -1994,7 +2020,7 @@ void linphone_subscription_closed(LinphoneCore *lc, SalOp *op){
 		linphone_friend_remove_incoming_subscription(lf, op);
 	}else{
 		/*case of an op that we already released because the friend was destroyed*/
-		ms_message("Receiving unsuscribe for unknown in-subscribtion from %s", sal_op_get_from(op));
+		ms_message("Receiving unsuscribe for unknown in-subscribtion from %s", op->getFrom().c_str());
 	}
 }
 

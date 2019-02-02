@@ -82,10 +82,6 @@ extern MSSndCardDesc oss_card_desc;
 extern MSSndCardDesc arts_card_desc;
 #endif
 
-#ifdef _WIN32
-extern MSSndCardDesc ms_wasapi_snd_card_desc;
-#endif
-
 #ifdef __DIRECTSOUND_ENABLED__
 extern MSSndCardDesc winsndds_card_desc;
 #endif
@@ -139,10 +135,6 @@ static MSSndCardDesc * ms_snd_card_descs[]={
 
 #ifdef __ARTS_ENABLED__
 	&arts_card_desc,
-#endif
-
-#ifdef _WIN32
-	&ms_wasapi_snd_card_desc,
 #endif
 
 #ifdef __DIRECTSOUND_ENABLED__
@@ -318,15 +310,10 @@ void ms_factory_init_voip(MSFactory *obj){
 
 #if defined(__ANDROID__) && defined (VIDEO_ENABLED)
 	{
-		MSDevicesInfo *devices = ms_factory_get_devices_info(obj);
-		SoundDeviceDescription *description = ms_devices_info_get_sound_device_description(devices);
-		if (description && description->flags & DEVICE_HAS_CRAPPY_OPENGL) {
-			if (!libmsandroiddisplay_init(obj)) {
-				libmsandroiddisplaybad_init(obj);
-			}
-		} else {
-			libmsandroidopengldisplay_init(obj);
+		if (!libmsandroiddisplay_init(obj)) {
+			libmsandroiddisplaybad_init(obj);
 		}
+		libmsandroidopengldisplay_init(obj);
 	}
 #endif
 	obj->voip_initd=TRUE;

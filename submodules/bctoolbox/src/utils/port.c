@@ -112,14 +112,14 @@ char * bctbx_dirname(const char *path) {
 	char *dname = bctbx_strdup(path);
 	bool_t found = FALSE;
 
-	ptr = strchr(path, '/');
+	ptr = strrchr(path, '/');
 	if (ptr != NULL) {
-		dname[ptr - path + 1] = '\0';
+		dname[ptr - path] = '\0';
 		found = TRUE;
 	} else {
-		ptr = strchr(path, '\\');
+		ptr = strrchr(path, '\\');
 		if (ptr != NULL) {
-			dname[ptr - path + 1] = '\0';
+			dname[ptr - path] = '\0';
 			found = TRUE;
 		}
 	}
@@ -156,6 +156,15 @@ int bctbx_socket_set_non_blocking(bctbx_socket_t sock){
 
 int bctbx_file_exist(const char *pathname) {
 	return access(pathname,F_OK);
+}
+
+bool_t bctbx_directory_exists(const char *pathname) {
+	struct stat sb;
+#ifdef WIN32
+	return stat(pathname, &sb) == 0 && (_S_IFDIR & sb.st_mode);
+#else
+	return stat(pathname, &sb) == 0 && S_ISDIR(sb.st_mode);
+#endif
 }
 
 #if	!defined(_WIN32) && !defined(_WIN32_WCE)
@@ -1216,6 +1225,50 @@ static void _bctbx_addrinfo_to_ip_address_error(int err, char *ip, size_t ip_siz
 	strncpy(ip, "<bug!!>", ip_size);
 }
 
+struct addrinfo* bctbx_addrinfo_sort(struct addrinfo *ais) {
+	bctbx_list_t* v6 = NULL;
+	bctbx_list_t* v4_mapped = NULL;
+	bctbx_list_t* v4 = NULL;
+	bctbx_list_t *it = NULL;
+	struct addrinfo* res0 = NULL;
+	struct addrinfo* res = NULL;
+	struct addrinfo* ai = NULL;
+	
+	//sort by type
+	for (ai = ais; ai != NULL;  ) {
+		struct addrinfo* next = ai->ai_next;
+		struct sockaddr_in6 *sock_in6 = (struct sockaddr_in6 *)ai->ai_addr;
+		if (ai->ai_family == AF_INET6) {
+			if (IN6_IS_ADDR_V4MAPPED(&sock_in6->sin6_addr)) {
+				v4_mapped = bctbx_list_prepend(v4_mapped, ai);
+			} else {
+				v6 = bctbx_list_prepend(v6, ai);
+			}
+		} else {
+				v4 = bctbx_list_prepend(v4, ai);
+		}
+		
+		ai->ai_next = NULL ;
+		ai = next;
+	}
+	v6 = bctbx_list_concat(v6, v4_mapped);
+	v6 = bctbx_list_concat(v6, v4);
+	
+	for (it = v6; it != NULL; it = it->next) {
+		if (res0 == NULL) {
+			res0 = res = (struct addrinfo*)it->data;
+		} else {
+			res->ai_next = (struct addrinfo*)it->data;
+			res = res->ai_next;
+ 		}
+	}
+	if (res)
+		res->ai_next = NULL;
+	
+	bctbx_list_free(v6);
+	
+	return res0;
+}
 int bctbx_addrinfo_to_ip_address(const struct addrinfo *ai, char *ip, size_t ip_size, int *port){
 	char serv[16];
 	int err=bctbx_getnameinfo(ai->ai_addr,(socklen_t)ai->ai_addrlen,ip,(socklen_t)ip_size,serv,(socklen_t)sizeof(serv),NI_NUMERICHOST|NI_NUMERICSERV);
@@ -1279,6 +1332,10 @@ static struct addrinfo * _bctbx_name_to_addrinfo(int family, int socktype, const
 			bctbx_error("%s(%s): getaddrinfo failed: %s",__FUNCTION__, ipaddress, gai_strerror(err));
 		return NULL;
 	}
+	//sort result
+	if (res)
+		res = bctbx_addrinfo_sort(res);
+	
 	return res;
 }
 
@@ -1351,9 +1408,6 @@ void bctbx_sockaddr_remove_nat64_mapping(const struct sockaddr *v6, struct socka
 
 void bctbx_sockaddr_ipv6_to_ipv4(const struct sockaddr *v6, struct sockaddr *result, socklen_t *result_len) {
 	bctbx_sockaddr_remove_v4_mapping(v6, result, result_len);
-	if (result->sa_family == AF_INET6) {
-		bctbx_sockaddr_remove_nat64_mapping(v6, result, result_len);
-	}
 }
 
 void bctbx_sockaddr_ipv4_to_ipv6(const struct sockaddr *v4, struct sockaddr *result, socklen_t *result_len) {
@@ -1679,3 +1733,13 @@ uint64_t bctbx_str_to_uint64(const uint8_t input_string[17]) {
 		| (((uint64_t)bctbx_char_to_byte(input_string[14]))<<4)
 		| (((uint64_t)bctbx_char_to_byte(input_string[15])));
 }
+
+#if defined(__ANDROID__)
+int mblen(const char* s, size_t n) {
+  mbstate_t state = {};
+  return (int)mbrlen(s, n, &state);
+}
+int wctomb(char *s, wchar_t wc) { 
+  return wcrtomb(s,wc,NULL); 
+}
+#endif

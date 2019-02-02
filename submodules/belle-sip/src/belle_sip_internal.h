@@ -1,6 +1,6 @@
 /*
 	belle-sip - SIP (RFC3261) library.
-	Copyright (C) 2010  Belledonne Communications SARL
+	Copyright (C) 2010-2018  Belledonne Communications SARL
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -15,6 +15,7 @@
 	You should have received a copy of the GNU General Public License
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 #ifndef belle_utils_h
 #define belle_utils_h
 
@@ -82,6 +83,16 @@
 			__method=BELLE_SIP_INTERFACE_GET_METHODS(__obj,interface_name)->method;\
 			if (__method) BELLE_SIP_INTERFACE_GET_METHODS(__obj,interface_name)->
 
+#define __BELLE_SIP_INVOKE_LISTENER_REVERSE_BEGIN(list,interface_name,method) \
+	if (list!=NULL) {\
+		belle_sip_list_t *__copy=belle_sip_list_copy_reverse_with_data((list), (void* (*)(void*))belle_sip_object_ref);\
+		const belle_sip_list_t *__elem=__copy;\
+		do{\
+			void *__method;\
+			interface_name *__obj=(interface_name*)__elem->data;\
+			__method=BELLE_SIP_INTERFACE_GET_METHODS(__obj,interface_name)->method;\
+			if (__method) BELLE_SIP_INTERFACE_GET_METHODS(__obj,interface_name)->
+
 #define __BELLE_SIP_INVOKE_LISTENER_END \
 			__elem=__elem->next;\
 		}while(__elem!=NULL);\
@@ -98,9 +109,13 @@
 	method(__obj,arg);\
 	__BELLE_SIP_INVOKE_LISTENER_END
 
-
 #define BELLE_SIP_INVOKE_LISTENERS_ARG1_ARG2(list,interface_name,method,arg1,arg2) \
 			__BELLE_SIP_INVOKE_LISTENER_BEGIN(list,interface_name,method)\
+			method(__obj,arg1,arg2);\
+			__BELLE_SIP_INVOKE_LISTENER_END
+
+#define BELLE_SIP_INVOKE_LISTENERS_REVERSE_ARG1_ARG2(list,interface_name,method,arg1,arg2) \
+			__BELLE_SIP_INVOKE_LISTENER_REVERSE_BEGIN(list,interface_name,method)\
 			method(__obj,arg1,arg2);\
 			__BELLE_SIP_INVOKE_LISTENER_END
 
@@ -214,6 +229,10 @@ BELLE_SIP_DECLARE_VPTR(belle_sip_header_content_disposition_t);
 BELLE_SIP_DECLARE_VPTR(belle_sip_header_accept_t);
 BELLE_SIP_DECLARE_VPTR(belle_sip_header_reason_t);
 BELLE_SIP_DECLARE_VPTR(belle_sip_header_authentication_info_t);
+#ifdef HAVE_MDNS
+BELLE_SIP_DECLARE_VPTR(belle_sip_mdns_source_t);
+BELLE_SIP_DECLARE_VPTR(belle_sip_mdns_register_t);
+#endif
 
 
 BELLE_SIP_DECLARE_CUSTOM_VPTR_BEGIN(belle_sip_resolver_context_t,belle_sip_source_t)
@@ -254,7 +273,7 @@ struct belle_sip_source{
 	unsigned char oneshot;
 	unsigned char notify_required; /*for testing purpose, use to ask for being scheduled*/
 	bctbx_iterator_t *it; /*for fast removal*/
-	belle_sip_main_loop_t *ml; 
+	belle_sip_main_loop_t *ml;
 };
 
 void belle_sip_socket_source_init(belle_sip_source_t *s, belle_sip_source_func_t func, void *data, belle_sip_socket_t fd, unsigned int events, unsigned int timeout_value_ms);
@@ -394,14 +413,8 @@ struct belle_sip_dict {
 		belle_sip_parameters_set_parameter(BELLE_SIP_PARAMETERS(obj),#attribute,NULL);\
 	}
 
-#ifdef HAVE_ANTLR_STRING_STREAM_NEW
 #define ANTLR_STREAM_NEW(object_type, value,length) \
 antlr3StringStreamNew((pANTLR3_UINT8)value,ANTLR3_ENC_8BIT,(ANTLR3_UINT32)length,(pANTLR3_UINT8)#object_type)
-#else
-#define ANTLR_STREAM_NEW(object_type, value, length) \
-antlr3NewAsciiStringCopyStream((pANTLR3_UINT8)value,(ANTLR3_UINT32)length,NULL)
-#endif /*HAVE_ANTLR_STRING_STREAM_NEW*/
-
 
 #define BELLE_PARSE(parser_name, object_type_prefix, object_type) \
 	object_type_prefix##object_type##_t* object_type_prefix##object_type##_parse (const char* value) { \
@@ -537,6 +550,7 @@ struct belle_sip_stack{
 
 	unsigned char dns_srv_enabled;
 	unsigned char dns_search_enabled;
+	unsigned char reconnect_to_primary_asap;
 };
 
 BELLESIP_EXPORT belle_sip_hop_t* belle_sip_hop_new(const char* transport, const char *cname, const char* host,int port);
@@ -616,6 +630,8 @@ struct _belle_sip_message {
 	belle_sip_object_t base;
 	belle_sip_list_t* header_list;
 	belle_sip_body_handler_t *body_handler;
+
+	char *multipart_body_cache;
 };
 
 struct _belle_sip_request {
@@ -711,6 +727,7 @@ struct belle_sip_client_transaction{
 BELLE_SIP_DECLARE_CUSTOM_VPTR_BEGIN(belle_sip_client_transaction_t,belle_sip_transaction_t)
 	void (*send_request)(belle_sip_client_transaction_t *);
 	void (*on_response)(belle_sip_client_transaction_t *obj, belle_sip_response_t *resp);
+	void (*stop_retransmissions)(belle_sip_client_transaction_t *obj);
 BELLE_SIP_DECLARE_CUSTOM_VPTR_END
 
 void belle_sip_client_transaction_init(belle_sip_client_transaction_t *obj, belle_sip_provider_t *prov, belle_sip_request_t *req);
@@ -962,6 +979,7 @@ struct belle_sip_auth_event {
 	char* distinguished_name;
 	belle_sip_certificates_chain_t * cert;
 	belle_sip_signing_key_t* key;
+	char* algorithm; /* either MD5 ot SHA256*/
 };
 
 belle_sip_auth_event_t* belle_sip_auth_event_create(belle_sip_object_t *source, const char* realm,const belle_sip_uri_t * from_uri);
@@ -1022,7 +1040,7 @@ typedef struct _belle_sip_header_extension belle_sip_header_extension_t;
 belle_sip_header_extension_t* belle_sip_header_extension_new(void);
 
 belle_sip_header_extension_t* belle_sip_header_extension_parse (const char* extension) ;
-belle_sip_header_extension_t* belle_sip_header_extension_create (const char* name,const char* value);
+BELLESIP_EXPORT belle_sip_header_extension_t* belle_sip_header_extension_create (const char* name,const char* value);
 BELLESIP_EXPORT const char* belle_sip_header_extension_get_value(const belle_sip_header_extension_t* extension);
 void belle_sip_header_extension_set_value(belle_sip_header_extension_t* extension,const char* value);
 #define BELLE_SIP_HEADER_EXTENSION(t) BELLE_SIP_CAST(t,belle_sip_header_extension_t)

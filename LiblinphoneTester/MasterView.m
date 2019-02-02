@@ -11,7 +11,7 @@
 
 #import "Log.h"
 #include "TargetConditionals.h"
-#include "linphone/liblinphone_tester.h"
+#include "linphonetester/liblinphone_tester.h"
 #include "mediastreamer2/msutils.h"
 
 @interface MasterView () {
@@ -63,7 +63,7 @@ void tester_logs_handler(int level, const char *fmt, va_list args) {
 	LOGI(@"Bundle path: %@", bundlePath);
 	LOGI(@"Writable path: %@", writablePath);
 
-#if (TARGET_OS_SIMULATOR)
+#if TARGET_OS_SIMULATOR
 	char *xmlFile = bc_tester_file("LibLinphoneIOS.xml");
 	char *args[] = {"--xml-file", xmlFile};
 	bc_tester_parse_args(2, args, 0);

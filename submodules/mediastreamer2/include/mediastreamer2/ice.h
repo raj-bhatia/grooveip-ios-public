@@ -120,6 +120,7 @@ typedef struct _IceSession {
 	socklen_t ss_len;	/**< Length of the STUN server address to use for the candidates gathering process */
 	MSTimeSpec gathering_start_ts;
 	MSTimeSpec gathering_end_ts;
+	MSTimeSpec connectivity_checks_start_ts;
 	IceCandidateType default_types[ICT_CandidateTypeMax];
 	bool_t check_message_integrity; /*set to false for backward compatibility only*/
 	bool_t send_event;	/**< Boolean value telling whether an event must be sent or not */
@@ -184,6 +185,7 @@ typedef struct _IceCandidate {
  * Structure representing an ICE candidate pair.
  */
 typedef struct _IceCandidatePair {
+	IceRole role;	/**< Role of the agent when the connectivity check has been sent for the candidate pair */
 	IceCandidate *local;	/**< Pointer to the local candidate of the pair */
 	IceCandidate *remote;	/**< Pointer to the remote candidate of the pair */
 	IceCandidatePairState state;	/**< State of the candidate pair */
@@ -191,11 +193,12 @@ typedef struct _IceCandidatePair {
 	MSTimeSpec transmission_time;	/**< Time when the connectivity check for the candidate pair has been sent */
 	int32_t rto;	/**< Duration of the retransmit timer for the connectivity check sent for the candidate pair in ms */
 	uint8_t retransmissions;	/**< Number of retransmissions for the connectivity check sent for the candidate pair */
-	IceRole role;	/**< Role of the agent when the connectivity check has been sent for the candidate pair */
 	bool_t is_default;	/**< Boolean value telling whether this candidate pair is a default candidate pair or not */
 	bool_t use_candidate;	/**< Boolean value telling if the USE-CANDIDATE attribute must be set for the connectivity checks send for the candidate pair */
 	bool_t is_nominated;	/**< Boolean value telling whether this candidate pair is nominated or not */
-	bool_t wait_transaction_timeout;	/**< Boolean value telling to create a new binding request on retransmission timeout */
+	bool_t nomination_pending; /** Boolean value telling whether this candidate pair was nominated by the remote (in controlled mode), but we could not yet complete the check*/
+	bool_t has_canceled_transaction;	/**< Boolean value telling that the pair has a cancelled transaction, see RFC5245 7.2.1.4.  Triggered Checks */
+	bool_t nomination_failing; /**<Boolean that indicates that this pair was nominated but it is apparently failing because no response is received.*/
 	bool_t retry_with_dummy_message_integrity; /** use to tell to retry with dummy message integrity. Useful to keep backward compatibility with older version*/
 	bool_t use_dummy_hmac; /*don't compute real hmac. used for backward compatibility*/
 } IceCandidatePair;
@@ -213,12 +216,14 @@ typedef struct _IcePairFoundation {
 typedef struct _IceValidCandidatePair {
 	IceCandidatePair *valid;	/**< Pointer to a valid candidate pair (it may be in the check list or not */
 	IceCandidatePair *generated_from;	/**< Pointer to the candidate pair that generated the connectivity check producing the valid candidate pair */
+	MSTimeSpec last_keepalive; /**< Time at which last keepalive was sent*/
 	bool_t selected;	/**< Boolean value telling whether this valid candidate pair has been selected or not */
 } IceValidCandidatePair;
 
 typedef struct _IceTransaction {
 	UInt96 transactionID;	/**< Transaction ID of the connectivity check sent for the candidate pair */
 	IceCandidatePair *pair;	/**< A pointer to the candidate pair associated with the transaction. */
+	int canceled;
 } IceTransaction;
 
 /**
@@ -250,13 +255,15 @@ typedef struct _IceCheckList {
 	MSTimeSpec ta_time;	/**< Time when the Ta timer has been processed for the last time */
 	MSTimeSpec keepalive_time;	/**< Time when the last keepalive packet has been sent for this stream */
 	uint32_t foundation_generator;	/**< Autoincremented integer to generate unique foundation values */
+	MSTimeSpec gathering_start_time;	/**< Time when the gathering process was started */
+	MSTimeSpec nomination_delay_start_time;	/**< Time when the nomination process has been delayed */
+	IceStunRequestRoundTripTime rtt;
 	bool_t mismatch;	/**< Boolean value telling whether there was a mismatch during the answer/offer process */
 	bool_t gathering_candidates;	/**< Boolean value telling whether a candidate gathering process is running or not */
 	bool_t gathering_finished;	/**< Boolean value telling whether the candidate gathering process has finished or not */
 	bool_t nomination_delay_running;	/**< Boolean value telling whether the nomination process has been delayed or not */
-	MSTimeSpec gathering_start_time;	/**< Time when the gathering process was started */
-	MSTimeSpec nomination_delay_start_time;	/**< Time when the nomination process has been delayed */
-	IceStunRequestRoundTripTime rtt;
+	bool_t connectivity_checks_running; /**<Boolean to indicate that check list processing is in progress */
+	bool_t nomination_in_progress; /**<substate between ICL_Running and ICL_Completed, when the USE-CANDIDATE requests are waiting for their responses*/
 } IceCheckList;
 
 

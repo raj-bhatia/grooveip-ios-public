@@ -1,3 +1,4 @@
+
 # Copyright (C) 2017 Belledonne Communications SARL
 # 
 # This program is free software; you can redistribute it and/or
@@ -17,180 +18,87 @@
 
 import re
 import genapixml as CApi
+import metaname
+import logging
 
 
-class Error(RuntimeError):
-	pass
+logger = logging.getLogger(__name__)
 
 
-class BlacklistedException(Error):
-	pass
-
-
-class Name(object):
-	camelCaseParsingRegex = re.compile('[A-Z][a-z0-9]*')
-	lowerCamelCaseSplitingRegex = re.compile('([a-z][a-z0-9]*)([A-Z][a-z0-9]*)')
+class Error(Exception):
+	@property
+	def reason(self):
+		return self.args[0]
 	
-	def __init__(self):
-		self.words = []
-		self.prev = None
-	
-	def copy(self):
-		nameType = type(self)
-		name = nameType()
-		name.words = list(self.words)
-		name.prev = None if self.prev is None else self.prev.copy()
-		return name
-	
-	def delete_prefix(self, prefix):
-		it = self
-		_next = None
-		while it is not None and it.words != prefix.words:
-			_next = it
-			it = it.prev
-		
-		if it is None or it != prefix:
-			raise Error('no common prefix')
-		elif _next is not None:
-			_next.prev = None
-	
-	def _set_namespace(self, namespace):
-		self.prev = namespace
-		if self.prev is not None:
-			prefix = namespace.to_word_list()
-			i = 0
-			while i<len(self.words) and i<len(prefix) and self.words[i] == prefix[i]:
-				i += 1
-			if i == len(self.words):
-				raise Error('name equal to namespace \'{0}\'', self.words)
-			else:
-				self.words = self.words[i:]
-	
-	def _lower_all_words(self):
-		i = 0
-		while i<len(self.words):
-			self.words[i] = self.words[i].lower()
-			i += 1
-	
-	def from_snake_case(self, name, namespace=None):
-		self.words = name.split('_')
-		Name._set_namespace(self, namespace)
-	
-	def from_camel_case(self, name, islowercased=False, namespace=None):
-		if not islowercased:
-			self.words = Name.camelCaseParsingRegex.findall(name)
-		else:
-			match = Name.lowerCamelCaseSplitingRegex.match(name)
-			self.words = [match.group(1)]
-			self.words += Name.camelCaseParsingRegex.findall(match.group(2))
-		
-		Name._lower_all_words(self)
-		Name._set_namespace(self, namespace)
-	
-	def to_snake_case(self, fullName=False, upper=False):
-		if self.prev is None or not fullName:
-			res = '_'.join(self.words)
-			if upper:
-				res = res.upper()
-			return res
-		else:
-			return Name.to_snake_case(self.prev, fullName=True, upper=upper) + '_' + Name.to_snake_case(self, upper=upper)
-	
-	def to_camel_case(self, lower=False, fullName=False):
-		if self.prev is None or not fullName:
-			res = ''
-			for elem in self.words:
-				if elem is self.words[0] and lower:
-					res += elem
-				else:
-					res += elem.title()
-			return res
-		else:
-			return Name.to_camel_case(self.prev, fullName=True, lower=lower) + Name.to_camel_case(self)
-	
-	def concatenate(self, upper=False, fullName=False):
-		if self.prev is None or not fullName:
-			res = ''
-			for elem in self.words:
-				if upper:
-					res += elem.upper()
-				else:
-					res += elem
-			return res
-		else:
-			return Name.concatenate(self.prev, upper=upper, fullName=True) + Name.concatenate(self, upper=upper)
-	
-	def to_word_list(self):
-		if self.prev is None:
-			return list(self.words)
-		else:
-			return Name.to_word_list(self.prev) + self.words
+	def __str__(self):
+		return str(self.reason)
 	
 	@staticmethod
-	def find_common_parent(name1, name2):
-		if name1.prev is None or name2.prev is None:
-			return None
-		elif name1.prev is name2.prev:
-			return name1.prev
+	def _name_get_type_as_string(name):
+		if type(name) is metaname.ClassName:
+			return 'class'
+		elif type(name) is metaname.EnumName:
+			return 'enum'
+		elif type(name) is metaname.EnumeratorName:
+			return 'enumerator'
+		elif type(name) is metaname.MethodName:
+			return 'function'
 		else:
-			commonParent = Name.find_common_parent(name1.prev, name2)
-			if commonParent is not None:
-				return commonParent
-			else:
-				return Name.find_common_parent(name1, name2.prev)
+			raise TypeError('{0} not handled'.format(type(name)))
 
 
-class ClassName(Name):
-	def to_c(self):
-		return Name.to_camel_case(self, fullName=True)
+class ParsingError(Error):
+	@property
+	def context(self):
+		return self.args[1] if len(self.args) >= 2 else None
+	
+	def __str__(self):
+		if self.context is None:
+			return Error.__str__(self)
+		else:
+			params = {
+				'reason': self.reason,
+				'name': self.context.to_c(addBrackets=True),
+				'type_': Error._name_get_type_as_string(self.context)
+			}
+			return "error while parsing {name} {type_}: {reason}".format(**params)
 
 
-class InterfaceName(ClassName):
-	def to_c(self):
-		return ClassName.to_c(self)[:-8] + 'Cbs'
+class BlacklistedSymbolError(Error):
+	@property
+	def name(self):
+		return self.args[0]
+	
+	def __str__(self):
+		params = {
+			'name': self.name.to_c(addBrackets=True),
+			'type_': Error._name_get_type_as_string(self.name)
+		}
+		return "{name} {type_} has been blacklisted".format(**params)
 
 
-class EnumName(ClassName):
+class TranslationError(Error):
 	pass
 
 
-class EnumValueName(ClassName):
+class Constant:
 	pass
 
 
-class MethodName(Name):
-	regex = re.compile('^\d+$')
+class Nil(Constant):
+	def translate(self, langTranslator):
+		return langTranslator.nilToken
+
+
+class Boolean(Constant):
+	def __init__(self, value=False):
+		self.value = value
 	
-	def __init__(self):
-		self.overloadRef = 0
+	def __bool__(self):
+		return self.value
 	
-	def from_snake_case(self, name, namespace=None):
-		Name.from_snake_case(self, name, namespace=namespace)
-		if len(self.words) > 0:
-			suffix = self.words[-1]
-			if MethodName.regex.match(suffix) is not None:
-				self.overloadRef = int(suffix)
-				del self.words[-1]
-	
-	def to_c(self):
-		suffix = ('_' + str(self.overloadRef)) if self.overloadRef > 0 else ''
-		return self.to_snake_case(fullName=True) + suffix
-
-
-class ArgName(Name):
-	def to_c(self):
-		return self.to_snake_case()
-
-
-class PropertyName(ArgName):
-	pass
-
-
-class NamespaceName(Name):
-	def __init__(self, *params):
-		Name.__init__(self)
-		if len(params) > 0:
-			self.words = params[0]
+	def translate(self, langTranslator):
+		return langTranslator.trueConstantToken if self else langTranslator.falseConstantToken
 
 
 class Object(object):
@@ -199,11 +107,21 @@ class Object(object):
 		self.parent = None
 		self.deprecated = False
 	
-	def find_first_ancestor_by_type(self, _type):
+	def __lt__(self, other):
+		return self.name < other.name
+	
+	def find_first_ancestor_by_type(self, *types, **kargs):
+		try:
+			priorAncestor = kargs['priorAncestor']
+		except KeyError:
+			priorAncestor = False
+
+		current = self
 		ancestor = self.parent
-		while ancestor is not None and type(ancestor) is not _type:
+		while ancestor is not None and type(ancestor) not in types:
+			current = ancestor
 			ancestor = ancestor.parent
-		return ancestor
+		return ancestor if not priorAncestor else current
 
 
 class Type(Object):
@@ -211,7 +129,7 @@ class Type(Object):
 		Object.__init__(self, name)
 		self.isconst = isconst
 		self.isref = isref
-		self.cname = None
+		self.cDecl = None
 
 
 class BaseType(Type):
@@ -219,18 +137,27 @@ class BaseType(Type):
 		Type.__init__(self, name, isconst=isconst, isref=isref)
 		self.size = size
 		self.isUnsigned = isUnsigned
+	
+	def translate(self, translator, **params):
+		return translator.translate_base_type(self, **params)
 
 
 class EnumType(Type):
 	def __init__(self, name, isconst=False, isref=False, enumDesc=None):
 		Type.__init__(self, name, isconst=isconst, isref=isref)
 		self.desc = enumDesc
+	
+	def translate(self, translator, **params):
+		return translator.translate_enum_type(self, **params)
 
 
 class ClassType(Type):
 	def __init__(self, name, isconst=False, isref=False, classDesc=None):
 		Type.__init__(self, name, isconst=isconst, isref=isref)
 		self.desc = classDesc
+	
+	def translate(self, translator, **params):
+		return translator.translate_class_type(self, **params)
 
 
 class ListType(Type):
@@ -239,22 +166,42 @@ class ListType(Type):
 		self.containedTypeName = containedTypeName
 		self._containedTypeDesc = None
 	
-	def set_contained_type_desc(self, desc):
+	@property
+	def containedTypeDesc(self):
+		return self._containedTypeDesc
+	
+	@containedTypeDesc.setter
+	def containedTypeDesc(self, desc):
 		self._containedTypeDesc = desc
 		desc.parent = self
 	
-	def get_contained_type_desc(self):
-		return self._containedTypeDesc
-	
-	containedTypeDesc = property(fset=set_contained_type_desc, fget=get_contained_type_desc)
+	def translate(self, translator, **params):
+		return translator.translate_list_type(self, **params)
 
 
 class DocumentableObject(Object):
 	def __init__(self, name):
 		Object.__init__(self, name)
-		self.briefDescription = None
-		self.detailedDescription = None
-		self.deprecated = None
+		self._briefDescription = None
+		self._detailedDescription = None
+	
+	@property
+	def briefDescription(self):
+		return self._briefDescription
+	
+	@briefDescription.setter
+	def briefDescription(self, description):
+		self._briefDescription = description
+		description.relatedObject = self
+	
+	@property
+	def detailedDescription(self):
+		return self._detailedDescription
+	
+	@detailedDescription.setter
+	def detailedDescription(self, description):
+		self._detailedDescription = description
+		description.relatedObject = self
 	
 	def set_from_c(self, cObject, namespace=None):
 		self.briefDescription = cObject.briefDescription
@@ -266,7 +213,7 @@ class DocumentableObject(Object):
 		if isinstance(self, (Namespace,Enum,Class)):
 			return self
 		elif self.parent is None:
-			raise Error('{0} is not attached to a namespace object'.format(self))
+			return None
 		else:
 			return self.parent.get_namespace_object()
 
@@ -274,11 +221,48 @@ class DocumentableObject(Object):
 class Namespace(DocumentableObject):
 	def __init__(self, name):
 		DocumentableObject.__init__(self, name)
-		self.children = []
+		self.enums = []
+		self.classes = []
+		self.interfaces = []
+
+	def addenum(self, enum):
+		Namespace._insert_element(self.enums, enum)
+		enum.parent = self
+
+	def delenum(self, enum):
+		i = self.enums.index(enum)
+		del self.enums[i]
+		enum.parent = None
+
+	def addclass(self, class_):
+		Namespace._insert_element(self.classes, class_)
+		class_.parent = self
+
+	def delclass(self, class_):
+		i = self.classes.index(class_)
+		del self.classes[i]
+		class_.parent = None
 	
-	def add_child(self, child):
-		self.children.append(child)
-		child.parent = self
+	def addinterface(self, interface):
+		Namespace._insert_element(self.interfaces, interface)
+		interface.parent = self
+
+	def delinterface(self, interface):
+		i = self.interfaces.index(interface)
+		del self.interfaces[i]
+		interface.parent = None
+
+	@staticmethod
+	def _insert_element(l, e):
+		try:
+			inspoint = next(x for x in l if e.name < x.name)
+			index = l.index(inspoint)
+			l.insert(index, e)
+		except StopIteration:
+			l.append(e)
+
+
+GlobalNs = Namespace('')
 
 
 class Flag:
@@ -286,27 +270,30 @@ class Flag:
 		self.position = position
 
 
-class EnumValue(DocumentableObject):
+class Enumerator(DocumentableObject):
 	def __init__(self, name):
 		DocumentableObject.__init__(self, name)
 		self.value = None
 	
 	def value_from_string(self, stringValue):
-		m = re.match('^1\s*<<\s*([0-9]+)$', stringValue)
+		m = re.match('^\s*1\s*<<\s*([0-9]+)$', stringValue)
 		if m is not None:
 			self.value = Flag(int(m.group(1)))
 		else:
 			self.value = int(stringValue, base=0)
+	
+	def translate_value(self, translator):
+		return translator.translate_enumerator_value(self.value)
 
 
 class Enum(DocumentableObject):
 	def __init__(self, name):
 		DocumentableObject.__init__(self, name)
-		self.values = []
+		self.enumerators = []
 	
-	def add_value(self, value):
-		self.values.append(value)
-		value.parent = self
+	def add_enumerator(self, enumerator):
+		self.enumerators.append(enumerator)
+		enumerator.parent = self
 	
 	def set_from_c(self, cEnum, namespace=None):
 		Object.set_from_c(self, cEnum, namespace=namespace)
@@ -316,14 +303,14 @@ class Enum(DocumentableObject):
 		else:
 			name = cEnum.name
 		
-		self.name = EnumName()
+		self.name = metaname.EnumName()
 		self.name.prev = None if namespace is None else namespace.name
 		self.name.set_from_c(name)
 		
 		for cEnumValue in cEnum.values:
-			aEnumValue = EnumValue()
+			aEnumValue = Enumerator()
 			aEnumValue.set_from_c(cEnumValue, namespace=self)
-			self.add_value(aEnumValue)
+			self.add_enumerator(aEnumValue)
 
 
 class Argument(DocumentableObject):
@@ -334,14 +321,17 @@ class Argument(DocumentableObject):
 		self.optional = optional
 		self.default = default
 	
-	def _set_type(self, _type):
+	@property
+	def type(self):
+		return self._type
+	
+	@type.setter
+	def type(self, _type):
 		self._type = _type
 		_type.parent = self
 	
-	def _get_type(self):
-		return self._type
-	
-	type = property(fset=_set_type, fget=_get_type)
+	def translate(self, translator, **params):
+		return translator.translate_argument(self, **params)
 
 
 class Method(DocumentableObject):
@@ -352,22 +342,25 @@ class Method(DocumentableObject):
 	def __init__(self, name, type=Type.Instance):
 		DocumentableObject.__init__(self, name)
 		self.type = type
-		self.constMethod = False
+		self.isconst = False
 		self.args = []
 		self._returnType = None
-		
-	def _set_return_type(self, returnType):
-		self._returnType = returnType
-		returnType.parent = self
-	
-	def _get_return_type(self):
-		return self._returnType
 	
 	def add_arguments(self, arg):
 		self.args.append(arg)
 		arg.parent = self
 	
-	returnType = property(fset=_set_return_type, fget=_get_return_type)
+	@property
+	def returnType(self):
+		return self._returnType
+	
+	@returnType.setter
+	def returnType(self, returnType):
+		self._returnType = returnType
+		returnType.parent = self
+	
+	def translate_as_prototype(self, translator, **params):
+		return translator.translate_method_as_prototype(self, **params)
 
 
 class Property(DocumentableObject):
@@ -377,91 +370,138 @@ class Property(DocumentableObject):
 		self._getter = None
 		self._type = None
 	
-	def set_setter(self, setter):
+	@property
+	def setter(self):
+		return self._setter
+
+	@setter.setter
+	def setter(self, setter):
 		self._setter = setter
 		setter.parent = self
 	
-	def get_setter(self):
-		return self._setter
+	@property
+	def getter(self):
+		return self._getter
 	
-	def set_getter(self, getter):
+	@getter.setter
+	def getter(self, getter):
 		self._getter = getter
 		if self._type is None:
 			self._type = getter.returnType
 		getter.parent = self
-	
-	def get_getter(self):
-		return self._getter
-	
-	setter = property(fset=set_setter, fget=get_setter)
-	getter = property(fset=set_getter, fget=get_getter)
 
 
-class Class(DocumentableObject):
+class Class(Namespace):
 	def __init__(self, name):
-		DocumentableObject.__init__(self, name)
+		Namespace.__init__(self, name)
 		self.properties = []
 		self.instanceMethods = []
 		self.classMethods = []
 		self._listenerInterface = None
 		self.multilistener = False
 		self.refcountable = False
-	
+
 	def add_property(self, property):
-		self.properties.append(property)
+		Namespace._insert_element(self.properties, property)
 		property.parent = self
 	
 	def add_instance_method(self, method):
-		self.instanceMethods.append(method)
+		Namespace._insert_element(self.instanceMethods, method)
 		method.parent = self
 	
 	def add_class_method(self, method):
-		self.classMethods.append(method)
+		Namespace._insert_element(self.classMethods, method)
 		method.parent = self
 	
-	def set_listener_interface(self, interface):
+	@property
+	def listenerInterface(self):
+		return self._listenerInterface
+	
+	@listenerInterface.setter
+	def listenerInterface(self, interface):
 		self._listenerInterface = interface
 		interface._listenedClass = self
 	
-	def get_listener_interface(self):
-		return self._listenerInterface
-	
-	listenerInterface = property(fget=get_listener_interface, fset=set_listener_interface)
+	def sort(self):
+		self.properties.sort()
+		self.instanceMethods.sort()
+		self.classMethods.sort()
 
 
-class Interface(DocumentableObject):
+class Interface(Namespace):
 	def __init__(self, name):
-		DocumentableObject.__init__(self, name)
-		self.methods = []
+		Namespace.__init__(self, name)
+		self.instanceMethods = []
+		self.classMethods = []
 		self._listenedClass = None
-	
-	def add_method(self, method):
-		self.methods.append(method)
+
+	def add_instance_methods(self, method):
+		self.instanceMethods.append(method)
 		method.parent = self
-	
-	def get_listened_class(self):
+
+	def add_class_methods(self, method):
+		self.classMethods.append(method)
+		method.parent = self
+
+	@property
+	def listenedClass(self):
 		return self._listenedClass
-	
-	listenedClass = property(fget=get_listened_class)
+
+	@listenedClass.setter
+	def listenedClass(self, method):
+		self.instanceMethods.append(method)
+		method.parent = self
+
+	def sort(self):
+		self.instanceMethods.sort()
 
 
 class CParser(object):
-	def __init__(self, cProject):
+	def __init__(self, cProject, classBlAppend=[]):
 		self.cBaseType = ['void', 'bool_t', 'char', 'short', 'int', 'long', 'size_t', 'time_t', 'float', 'double', 'LinphoneStatus']
 		self.cListType = 'bctbx_list_t'
 		self.regexFixedSizeInteger = '^(u?)int(\d?\d)_t$'
 		self.methodBl = ['ref', 'unref', 'new', 'destroy', 'getCurrentCallbacks', 'setUserData', 'getUserData']
 		self.functionBl = [
-					   'linphone_factory_create_core', # manualy wrapped
-					   'linphone_factory_create_core_with_config', # manualy wrapped
-					   'linphone_vcard_get_belcard'] # manualy wrapped
+					   'linphone_factory_create_core', # manually wrapped
+					   'linphone_factory_create_core_2', # manually wrapped
+					   'linphone_factory_create_core_with_config', # manually wrapped
+					   'linphone_factory_create_core_with_config_2', # manually wrapped
+					   'linphone_vcard_get_belcard'] # manually wrapped
 
 		self.classBl = ['LpConfig']  # temporarly blacklisted
+		for bl in classBlAppend:
+			self.classBl.append(bl)
 		
 		# list of classes that must be concidered as refcountable even if
 		# they are no ref()/unref() methods
 		self.forcedRefcountableClasses = ['LinphoneFactory']
 		
+		self.enum_relocations = {
+			'LinphoneAccountCreatorActivationCodeStatus' : 'LinphoneAccountCreator',
+			'LinphoneAccountCreatorDomainStatus'         : 'LinphoneAccountCreator',
+			'LinphoneAccountCreatorEmailStatus'          : 'LinphoneAccountCreator',
+			'LinphoneAccountCreatorLanguageStatus'       : 'LinphoneAccountCreator',
+			'LinphoneAccountCreatorPasswordStatus'       : 'LinphoneAccountCreator',
+			'LinphoneAccountCreatorPhoneNumberStatus'    : 'LinphoneAccountCreator',
+			'LinphoneAccountCreatorStatus'               : 'LinphoneAccountCreator',
+			'LinphoneAccountCreatorTransportStatus'      : 'LinphoneAccountCreator',
+			'LinphoneAccountCreatorUsernameStatus'       : 'LinphoneAccountCreator',
+			'LinphoneCallDir'                            : 'LinphoneCall',
+			'LinphoneCallState'                          : 'LinphoneCall',
+			'LinphoneCallStatus'                         : 'LinphoneCall',
+			'LinphoneChatRoomState'                      : 'LinphoneChatRoom',
+			'LinphoneChatMessageDirection'               : 'LinphoneChatMessage',
+			'LinphoneChatMessageState'                   : 'LinphoneChatMessage',
+			'LinphoneCoreLogCollectionUploadState'       : 'LinphoneCore',
+			'LinphoneEventLogType'                       : 'LinphoneEventLog',
+			'LinphoneFriendListStatus'                   : 'LinphoneFriendList',
+			'LinphoneFriendListSyncStatus'               : 'LinphoneFriendList',
+			'LinphonePlayerState'                        : 'LinphonePlayer',
+			'LinphonePresenceActivityType'               : 'LinphonePresenceActivity',
+			'LinphoneTunnelMode'                         : 'LinphoneTunnel'
+		}
+
 		self.cProject = cProject
 		
 		self.enumsIndex = {}
@@ -492,15 +532,16 @@ class CParser(object):
 				if _property.getter is not None:
 					self.methodsIndex[_property.getter.name] = None
 		
-		name = NamespaceName()
+		name = metaname.NamespaceName()
 		name.from_snake_case('linphone')
 		
 		self.namespace = Namespace(name)
+		self._pending_enums = []
 	
 	def _is_blacklisted(self, name):
-		if type(name) is MethodName:
+		if type(name) is metaname.MethodName:
 			return name.to_camel_case(lower=True) in self.methodBl or name.to_c() in self.functionBl
-		elif type(name) is ClassName:
+		elif type(name) is metaname.ClassName:
 			return name.to_c() in self.classBl
 		else:
 			return False
@@ -509,22 +550,34 @@ class CParser(object):
 		for enum in self.cProject.enums:
 			try:
 				self.parse_enum(enum)
-			except Error as e:
-				print('Could not parse \'{0}\' enum: {1}'.format(enum.name, e.args[0]))
+			except BlacklistedSymbolError as e:
+				logger.debug(e)
 		
-		for _class in self.cProject.classes:
+		for class_ in self.cProject.classes:
 			try:
-				self.parse_class(_class)
-			except BlacklistedException:
-				pass
-			except Error as e:
-				print('Could not parse \'{0}\' class: {1}'.format(_class.name, e.args[0]))
+				self.parse_class(class_)
+			except BlacklistedSymbolError as e:
+				logger.debug(e)
 		
-		
+		self._treat_pending_enums()
 		self._clean_all_indexes()
 		self._fix_all_types()
 		self._fix_all_docs()
 	
+	def _treat_pending_enums(self):
+		for enum in self._pending_enums:
+			try:
+				enum_cname = enum.name.to_c()
+				parent_cname = self.enum_relocations[enum_cname]
+				newparent = self.classesIndex[parent_cname]
+				enum.parent.delenum(enum)
+				newparent.addenum(enum)
+				enum.name.from_c(enum_cname, namespace=newparent.name)
+			except KeyError:
+				reason = "cannot move the enum inside {0} enum because it doesn't exsist".format(parent_cname)
+				raise ParsingError(reason, context=enum.name)
+		self._pending_enums = []
+
 	def _clean_all_indexes(self):
 		for index in [self.classesIndex, self.interfacesIndex, self.methodsIndex]:
 			self._clean_index(index)
@@ -571,7 +624,7 @@ class CParser(object):
 			self._fix_all_types_in_method(method)
 	
 	def _fix_all_types_in_interface(self, interface):
-		for method in interface.methods:
+		for method in interface.instanceMethods:
 			self._fix_all_types_in_method(method)
 	
 	def _fix_all_types_in_method(self, method):
@@ -579,8 +632,8 @@ class CParser(object):
 			self._fix_type(method.returnType)
 			for arg in method.args:
 				self._fix_type(arg.type)
-		except Error as e:
-			print('warning: some types could not be fixed in {0}() function: {1}'.format(method.name.to_snake_case(fullName=True), e.args[0]))
+		except ParsingError as e:
+			raise ParsingError(e, method.name)
 		
 	def _fix_type(self, _type):
 		if isinstance(_type, EnumType) and _type.desc is None:
@@ -601,61 +654,75 @@ class CParser(object):
 				if _type.containedTypeName is not None:
 					_type.containedTypeDesc = self.parse_c_base_type(_type.containedTypeName)
 				else:
-					raise Error('bctbx_list_t type without specified contained type')
+					raise ParsingError('bctbx_list_t type without specified contained type')
 	
 	def _fix_all_docs(self):
 		for _class in self.classesIndex.values():
-			if _class.briefDescription is not None:
-				_class.briefDescription.resolve_all_references(self)
+			self._fix_doc(_class)
+		for enum in self.enumsIndex.values():
+			self._fix_doc(enum)
+			for enumerator in enum.enumerators:
+				self._fix_doc(enumerator)
 		for method in self.methodsIndex.values():
-			if method.briefDescription is not None:
-				method.briefDescription.resolve_all_references(self)
+			self._fix_doc(method)
+	
+	def _fix_doc(self, obj):
+		if obj.briefDescription is not None:
+			obj.briefDescription.resolve_all_references(self)
+		if obj.detailedDescription is not None:
+			obj.detailedDescription.resolve_all_references(self)
 	
 	def parse_enum(self, cenum):
-		if 'associatedTypedef' in dir(cenum):
-			nameStr = cenum.associatedTypedef.name
-		else:
-			nameStr = cenum.name
-		
-		name = EnumName()
-		name.from_camel_case(nameStr, namespace=self.namespace.name)
+		name = metaname.EnumName()
+		name.from_camel_case(cenum.publicName, namespace=self.namespace.name)
 		enum = Enum(name)
 		enum.briefDescription = cenum.briefDoc
-		self.namespace.add_child(enum)
+		enum.detailedDescription = cenum.detailedDoc
+		self.namespace.addenum(enum)
 		
 		for cEnumValue in cenum.values:
-			valueName = EnumValueName()
+			valueName = metaname.EnumeratorName()
 			valueName.from_camel_case(cEnumValue.name, namespace=name)
-			aEnumValue = EnumValue(valueName)
+			aEnumValue = Enumerator(valueName)
 			aEnumValue.briefDescription = cEnumValue.briefDoc
+			aEnumValue.detailedDescription = cEnumValue.detailedDoc
 			if cEnumValue.value is not None:
 				try:
 					aEnumValue.value_from_string(cEnumValue.value)
 				except ValueError:
-					raise Error('{0} enum value has an invalid definition ({1})'.format(cEnumValue.name, cEnumValue.value))
-			enum.add_value(aEnumValue)
+					reason = '{0} enum value has an invalid definition ({1})'.format(cEnumValue.name, cEnumValue.value)
+					context = metaname.EnumeratorName()
+					context.from_camel_case(cEnumValue.name)
+					raise ParsingError(reason, context)
+			enum.add_enumerator(aEnumValue)
 		
-		self.enumsIndex[nameStr] = enum
+		self.enumsIndex[cenum.publicName] = enum
+		if cenum.publicName in self.enum_relocations:
+			self._pending_enums.append(enum)
 		return enum
 	
 	def parse_class(self, cclass):
 		if cclass.name in self.classBl:
-			raise BlacklistedException('{0} is blacklisted'.format(cclass.name));
+			name = metaname.ClassName()
+			name.from_snake_case(cclass.name)
+			raise BlacklistedSymbolError(name)
 		
 		if cclass.name.endswith('Cbs'):
 			_class = self._parse_listener(cclass)
 			self.interfacesIndex[cclass.name] = _class
+			self.namespace.addinterface(_class)
 		else:
 			_class = self._parse_class(cclass)
 			self.classesIndex[cclass.name] = _class
-		self.namespace.add_child(_class)
+			self.namespace.addclass(_class)
 		return _class
 	
 	def _parse_class(self, cclass):
-		name = ClassName()
+		name = metaname.ClassName()
 		name.from_camel_case(cclass.name, namespace=self.namespace.name)
 		_class = Class(name)
 		_class.briefDescription = cclass.briefDoc
+		_class.detailedDescription = cclass.detailedDoc
 		_class.refcountable = self._class_is_refcountable(cclass)
 		
 		for cproperty in cclass.properties.values():
@@ -665,8 +732,8 @@ class CParser(object):
 					_class.add_property(absProperty)
 				else:
 					_class.listenerInterface = self.interfacesIndex[cproperty.getter.returnArgument.ctype]
-			except Error as e:
-				print('Could not parse {0} property in {1}: {2}'.format(cproperty.name, cclass.name, e.args[0]))
+			except BlacklistedSymbolError as e:
+				logger.debug(e)
 		
 		for cMethod in cclass.instanceMethods.values():
 			try:
@@ -679,25 +746,20 @@ class CParser(object):
 					pass
 				else:
 					_class.add_instance_method(method)
-					
-			except BlacklistedException:
-				pass
-			except Error as e:
-				print('Could not parse {0} function: {1}'.format(cMethod.name, e.args[0]))
-				
+			except BlacklistedSymbolError as e:
+				logger.debug(e)
+		
 		for cMethod in cclass.classMethods.values():
 			try:
 				method = self.parse_method(cMethod, type=Method.Type.Class, namespace=name)
 				_class.add_class_method(method)
-			except BlacklistedException:
-				pass
-			except Error as e:
-				print('Could not parse {0} function: {1}'.format(cMethod.name, e.args[0]))
+			except BlacklistedSymbolError as e:
+				logger.debug(e)
 		
 		return _class
 	
 	def _parse_property(self, cproperty, namespace=None):
-		name = PropertyName()
+		name = metaname.PropertyName()
 		name.from_snake_case(cproperty.name)
 		if (cproperty.setter is not None and len(cproperty.setter.arguments) == 1) or (cproperty.getter is not None and len(cproperty.getter.arguments) == 0):
 			methodType = Method.Type.Class
@@ -714,29 +776,31 @@ class CParser(object):
 	
 	
 	def _parse_listener(self, cclass):
-		name = InterfaceName()
-		name.from_camel_case(cclass.name, namespace=self.namespace.name)
-		
-		if name.words[len(name.words)-1] == 'cbs':
-			name.words[len(name.words)-1] = 'listener'
-		else:
-			raise Error('{0} is not a listener'.format(cclass.name))
-		
-		listener = Interface(name)
-		listener.briefDescription = cclass.briefDoc
-		
-		for property in cclass.properties.values():
-			if property.name != 'user_data':
-				try:
-					method = self._parse_listener_property(property, listener, cclass.events)
-					listener.add_method(method)
-				except Error as e:
-					print('Could not parse property \'{0}\' of listener \'{1}\': {2}'.format(property.name, cclass.name, e.args[0]))
-		
-		return listener
+		try:
+			name = metaname.InterfaceName()
+			name.from_camel_case(cclass.name, namespace=self.namespace.name)
+			name.words[-1] = 'listener'
+			
+			listener = Interface(name)
+			listener.briefDescription = cclass.briefDoc
+			listener.detailedDescription = cclass.detailedDoc
+			
+			for property in cclass.properties.values():
+				if property.name != 'user_data':
+					try:
+						method = self._parse_listener_property(property, listener, cclass.events)
+						listener.add_instance_methods(method)
+					except BlacklistedSymbolError as e:
+						logger.debug(e)
+			
+			return listener
+		except ParsingError as e:
+			context = metaname.ClassName()
+			context.from_camel_case(cclass.name)
+			raise ParsingError(e, context)
 	
 	def _parse_listener_property(self, property, listener, events):
-		methodName = MethodName()
+		methodName = metaname.MethodName()
 		methodName.from_snake_case(property.name)
 		methodName.words.insert(0, 'on')
 		methodName.prev = listener.name
@@ -746,47 +810,53 @@ class CParser(object):
 		elif property.setter is not None and len(property.setter.arguments) == 2:
 			eventName = property.setter.arguments[1].ctype
 		else:
-			raise Error('event name for {0} property of {1} listener not found'.format(property.name, listener.name.to_snake_case(fullName=True)))
+			raise ParsingError('event name for {0} property of {1} listener not found'.format(property.name, listener.name.to_c()))
 		
 		try:
 			event = events[eventName]
 		except KeyError:
-			raise Error('invalid event name \'{0}\''.format(eventName))
+			raise ParsingError('invalid event name \'{0}\''.format(eventName))
 		
 		method = Method(methodName)
 		method.returnType = self.parse_type(event.returnArgument)
 		for arg in event.arguments:
-			argName = ArgName()
+			argName = metaname.ArgName()
 			argName.from_snake_case(arg.name)
 			argument = Argument(argName, self.parse_type(arg))
 			method.add_arguments(argument)
+		method.briefDescription = event.briefDoc
+		method.detailedDescription = event.detailedDoc
 		
 		return method
 	
 	def parse_method(self, cfunction, namespace, type=Method.Type.Instance):
-		name = MethodName()
+		name = metaname.MethodName()
 		name.from_snake_case(cfunction.name, namespace=namespace)
 		
-		if self._is_blacklisted(name):
-			raise BlacklistedException('{0} is blacklisted'.format(name.to_c()));
-		
-		method = Method(name, type=type)
-		method.briefDescription = cfunction.briefDoc
-		method.deprecated = cfunction.deprecated
-		method.returnType = self.parse_type(cfunction.returnArgument)
-		
-		for arg in cfunction.arguments:
-			if type == Method.Type.Instance and arg is cfunction.arguments[0]:
-				method.constMethod = ('const' in arg.completeType.split(' '))
-			else:
-				aType = self.parse_type(arg)
-				argName = ArgName()
-				argName.from_snake_case(arg.name)
-				absArg = Argument(argName, aType)
-				method.add_arguments(absArg)
-		
-		self.methodsIndex[cfunction.name] = method
-		return method
+		try:
+			if self._is_blacklisted(name):
+				raise BlacklistedSymbolError(name)
+			
+			method = Method(name, type=type)
+			method.briefDescription = cfunction.briefDoc
+			method.detailedDescription = cfunction.detailedDoc
+			method.deprecated = cfunction.deprecated
+			method.returnType = self.parse_type(cfunction.returnArgument)
+			
+			for arg in cfunction.arguments:
+				if type == Method.Type.Instance and arg is cfunction.arguments[0]:
+					method.isconst = ('const' in arg.completeType.split(' '))
+				else:
+					aType = self.parse_type(arg)
+					argName = metaname.ArgName()
+					argName.from_snake_case(arg.name)
+					absArg = Argument(argName, aType)
+					method.add_arguments(absArg)
+			
+			self.methodsIndex[cfunction.name] = method
+			return method
+		except ParsingError as e:
+			raise ParsingError(e, name)
 	
 	def parse_type(self, cType):
 		if cType.ctype in self.cBaseType or re.match(self.regexFixedSizeInteger, cType.ctype):
@@ -802,9 +872,9 @@ class CParser(object):
 		elif cType.ctype.endswith('Mask'):
 			absType = BaseType('integer', isUnsigned=True)
 		else:
-			raise Error('Unknown C type \'{0}\''.format(cType.ctype))
+			raise ParsingError('Unknown C type \'{0}\''.format(cType.ctype))
 		
-		absType.cname = cType.completeType
+		absType.cDecl = cType.completeType
 		return absType
 	
 	def parse_c_base_type(self, cDecl):
@@ -851,7 +921,7 @@ class CParser(object):
 					elif 'isref' not in param or param['isref'] is False:
 						param['isref'] = True
 					else:
-						raise Error('Unhandled double-pointer')
+						raise ParsingError('Unhandled double-pointer')
 			else:
 				matchCtx = re.match(self.regexFixedSizeInteger, elem)
 				if matchCtx:
@@ -861,10 +931,415 @@ class CParser(object):
 					
 					param['size'] = int(matchCtx.group(2))
 					if param['size'] not in [8, 16, 32, 64]:
-						raise Error('{0} C basic type has an invalid size ({1})'.format(cDecl, param['size']))
+						raise ParsingError('{0} C basic type has an invalid size ({1})'.format(cDecl, param['size']))
 		
 		
 		if name is not None:
 			return BaseType(name, **param)
 		else:
-			raise Error('could not find type in \'{0}\''.format(cDecl))
+			raise ParsingError('could not find type in \'{0}\''.format(cDecl))
+
+
+
+class Translator:
+	instances = {}
+	
+	@staticmethod
+	def get(langCode):
+		try:
+			if langCode not in Translator.instances:
+				className = langCode + 'LangTranslator'
+				_class = globals()[className]
+				Translator.instances[langCode] = _class()
+			
+			return Translator.instances[langCode]
+		except KeyError:
+			raise ValueError("Invalid language code: '{0}'".format(langCode))
+
+	@staticmethod
+	def _namespace_to_name_translator_params(namespace):
+		return {
+			'recursive': True,
+			'topAncestor': namespace.name if namespace is not None else None
+		}
+
+
+class CLikeLangTranslator(Translator):
+	def translate_enumerator_value(self, value):
+		if value is None:
+			return None
+		elif isinstance(value, int):
+			return str(value)
+		elif isinstance(value, Flag):
+			return '1<<{0}'.format(value.position)
+		else:
+			raise TypeError('invalid enumerator value type: {0}'.format(value))
+	
+	def translate_argument(self, argument, hideArgName=False, namespace=None):
+		ret = argument.type.translate(self, namespace=namespace)
+		if not hideArgName:
+			ret += (' ' + argument.name.translate(self.nameTranslator))
+		return ret
+
+
+class CLangTranslator(CLikeLangTranslator):
+	def __init__(self):
+		self.nameTranslator = metaname.Translator.get('C')
+		self.nilToken = 'NULL'
+		self.falseConstantToken = 'FALSE'
+		self.trueConstantToken = 'TRUE'
+	
+	def translate_base_type(self, _type, **kargs):
+		return _type.cDecl
+	
+	def translate_enum_type(self, _type, **kargs):
+		return _type.cDecl
+	
+	def translate_class_type(self, _type, **kargs):
+		return _type.cDecl
+	
+	def translate_list_type(self, _type, **kargs):
+		return _type.cDecl
+	
+	def translate_enumerator_value(self, value, **kargs):
+		if value is None:
+			return None
+		elif isinstance(value, int):
+			return str(value)
+		elif isinstance(value, Flag):
+			return '1<<{0}'.format(value.position)
+		else:
+			raise TypeError('invalid enumerator value type: {0}'.format(value))
+	
+	def translate_method_as_prototype(self, method, hideArguments=False, hideArgNames=False, hideReturnType=False, stripDeclarators=False, namespace=None):
+		_class = method.find_first_ancestor_by_type(Class,Interface)
+		params = []
+		if not hideArguments:
+			params.append('{const}{className} *obj'.format(
+				className=_class.name.to_c(),
+				const='const ' if method.isconst and not stripDeclarators else ''
+			))
+			for arg in method.args:
+				params.append(arg.translate(self, hideArgName=hideArgNames))
+		return '{returnType}{name}({params})'.format(
+			returnType=(method.returnType.translate(self) + ' ') if not hideReturnType else '',
+			name=method.name.translate(self.nameTranslator),
+			params=', '.join(params)
+		)
+
+
+class CppLangTranslator(CLikeLangTranslator):
+	def __init__(self):
+		self.nameTranslator = metaname.Translator.get('Cpp')
+		self.nilToken = 'nullptr'
+		self.falseConstantToken = 'false'
+		self.trueConstantToken = 'true'
+		self.ambigousTypes = []
+	
+	def translate_base_type(self, _type, namespace=None):
+		if _type.name == 'void':
+			if _type.isref:
+				return 'void *'
+			else:
+				return 'void'
+		elif _type.name == 'boolean':
+			res = 'bool'
+		elif _type.name == 'character':
+			res = 'char'
+		elif _type.name == 'size':
+			res = 'size_t'
+		elif _type.name == 'time':
+			res = 'time_t'
+		elif _type.name == 'integer':
+			if _type.size is None:
+				res = 'int'
+			elif isinstance(_type.size, str):
+				res = _type.size
+			else:
+				res = 'int{0}_t'.format(_type.size)
+				
+		elif _type.name == 'floatant':
+			if _type.size is not None and _type.size == 'double':
+				res = 'double'
+			else:
+				res = 'float'
+		elif _type.name == 'status':
+			res = 'linphone::Status'
+		elif _type.name == 'string':
+			res = 'std::string'
+			if type(_type.parent) is Argument:
+				res += ' &'
+		elif _type.name == 'string_array':
+			res = 'std::list<std::string>'
+			if type(_type.parent) is Argument:
+				res += ' &'
+		else:
+			raise TranslationError('\'{0}\' is not a base abstract type'.format(_type.name))
+		
+		if _type.isUnsigned:
+			if _type.name == 'integer' and isinstance(_type.size, int):
+				res = 'u' + res
+			else:
+				res = 'unsigned ' + res
+		
+		if _type.isconst:
+			if _type.name not in ['string', 'string_array'] or type(_type.parent) is Argument:
+				res = 'const ' + res
+		
+		if _type.isref:
+			res += ' *'
+		return res
+	
+	def translate_enum_type(self, type_, namespace=None):
+		if type_.desc is None:
+			raise TranslationError('{0} has not been fixed'.format(type_.name))
+		return type_.desc.name.translate(self.nameTranslator, **Translator._namespace_to_name_translator_params(namespace))
+
+	def translate_class_type(self, type_, namespace=None):
+		if type_.desc is None:
+			raise TranslationError('{0} has not been fixed'.format(type_.name))
+		res = type_.desc.name.translate(self.nameTranslator, **Translator._namespace_to_name_translator_params(namespace))
+		
+		if type_.desc.refcountable:
+			if type_.isconst:
+				res = 'const ' + res
+			if type(type_.parent) is Argument:
+				return 'const std::shared_ptr<{0}> &'.format(res)
+			else:
+				return 'std::shared_ptr<{0}>'.format(res)
+		else:
+			if type(type_.parent) is Argument:
+				return 'const {0} &'.format(res)
+			else:
+				return '{0}'.format(res)
+	
+	def translate_list_type(self, _type, namespace=None):
+		if _type.containedTypeDesc is None:
+			raise TranslationError('{0} has not been fixed'.format(_type.containedTypeName))
+		elif isinstance(_type.containedTypeDesc, BaseType):
+			res = _type.containedTypeDesc.translate(self)
+		else:
+			res = _type.containedTypeDesc.translate(self, namespace=namespace)
+			
+		if type(_type.parent) is Argument:
+			return 'const std::list<{0}> &'.format(res)
+		else:
+			return 'std::list<{0}>'.format(res)
+	
+	def translate_method_as_prototype(self, method, hideArguments=False, hideArgNames=False, hideReturnType=False, stripDeclarators=False, namespace=None):
+		argsAsString = ', '.join([arg.translate(self, hideArgName=hideArgNames, namespace=namespace) for arg in method.args]) if not hideArguments else ''
+		return '{return_}{name}({args}){const}'.format(
+			return_=(method.returnType.translate(self, namespace=namespace) + ' ') if not hideReturnType else '',
+			name=method.name.translate(self.nameTranslator, **Translator._namespace_to_name_translator_params(namespace)),
+			args=argsAsString,
+			const=' const' if method.isconst and not stripDeclarators else ''
+		)
+
+
+class JavaLangTranslator(CLikeLangTranslator):
+	def __init__(self):
+		self.nameTranslator = metaname.Translator.get('Java')
+		self.nilToken = 'null'
+		self.falseConstantToken = 'false'
+		self.trueConstantToken = 'true'
+
+	def translate_base_type(self, type_, native=False, jni=False, isReturn=False, namespace=None):
+		if type_.name == 'string':
+			if jni:
+				return 'jstring'
+			return 'String'
+		elif type_.name == 'integer':
+			if type_.size is not None and type_.isref:
+				if jni:
+					return 'jbyteArray'
+				return 'byte[]'
+			if jni:
+				return 'jint'
+			return 'int'
+		elif type_.name == 'boolean':
+			if jni:
+				return 'jboolean'
+			return 'boolean'
+		elif type_.name == 'floatant':
+			if jni:
+				return 'jfloat'
+			return 'float'
+		elif type_.name == 'size':
+			if jni:
+				return 'jint'
+			return 'int'
+		elif type_.name == 'time':
+			if jni:
+				return 'jlong'
+			return 'long'
+		elif type_.name == 'status':
+			if jni:
+				return 'jint'
+			if native:
+				return 'int'
+			return 'void'
+		elif type_.name == 'string_array':
+			if jni:
+				return 'jobjectArray'
+			return 'String[]'
+		elif type_.name == 'character':
+			if jni:
+				return 'jchar'
+			return 'char'
+		elif type_.name == 'void':
+			if isReturn:
+				return 'void'
+			if jni:
+				return 'jobject'
+			return 'Object'
+		return type_.name
+
+	def translate_enum_type(self, _type, native=False, jni=False, isReturn=False, namespace=None):
+		if native:
+			return 'int'
+		elif jni:
+			return 'jint'
+		else:
+			return _type.desc.name.translate(self.nameTranslator, **Translator._namespace_to_name_translator_params(namespace))
+
+	def translate_class_type(self, _type, native=False, jni=False, isReturn=False, namespace=None):
+		if jni:
+			return 'jobject'
+		return _type.desc.name.translate(self.nameTranslator, **Translator._namespace_to_name_translator_params(namespace))
+
+	def translate_list_type(self, _type, native=False, jni=False, isReturn=False, namespace=None):
+		if jni:
+			if type(_type.containedTypeDesc) is ClassType:
+				return 'jobjectArray'
+			elif type(_type.containedTypeDesc) is BaseType:
+				if _type.containedTypeDesc.name == 'string':
+					return 'jobjectArray'
+				return _type.containedTypeDesc.translate(self, jni=True) + 'Array'
+			elif type(_type.containedTypeDesc) is EnumType:
+				ptrtype = _type.containedTypeDesc.translate(self, native=native)
+		ptrtype = ''
+		if type(_type.containedTypeDesc) is ClassType:
+			ptrtype = _type.containedTypeDesc.translate(self, native=native, namespace=namespace)
+		elif type(_type.containedTypeDesc) is BaseType:
+			ptrtype = _type.containedTypeDesc.translate(self, native=native, namespace=namespace)
+		elif type(_type.containedTypeDesc) is EnumType:
+			ptrtype = _type.containedTypeDesc.translate(self, native=native, namespace=namespace)
+		else:
+			if _type.containedTypeDesc:
+				raise Error('translation of bctbx_list_t of ' + _type.containedTypeDesc.name)
+			else:
+				raise Error('translation of bctbx_list_t of unknow type !')
+		return ptrtype + '[]'
+
+	def translate_argument(self, arg, native=False, jni=False, hideArgName=False, namespace=None):
+		res = arg.type.translate(self, native=native, jni=jni, namespace=namespace)
+		if not hideArgName:
+			res += (' ' + arg.name.translate(self.nameTranslator))
+		return res
+
+	def translate_method_as_prototype(self, method, hideArguments=False, hideArgNames=False, hideReturnType=False, stripDeclarators=False, namespace=None):
+		return '{public}{returnType}{methodName}({arguments})'.format(
+			public='public ' if not stripDeclarators else '',
+			returnType=(method.returnType.translate(self, isReturn=True, namespace=namespace) + ' ') if not hideReturnType else '',
+			methodName=method.name.translate(self.nameTranslator, **Translator._namespace_to_name_translator_params(namespace)),
+			arguments=', '.join([arg.translate(self, hideArgName=hideArgNames, namespace=namespace) for arg in method.args]) if not hideArguments else ''
+		)
+
+
+class CSharpLangTranslator(CLikeLangTranslator):
+	def __init__(self):
+		self.nameTranslator = metaname.Translator.get('CSharp')
+		self.nilToken = 'null'
+		self.falseConstantToken = 'false'
+		self.trueConstantToken = 'true'
+	
+	def translate_base_type(self, _type, dllImport=True, namespace=None):
+		if _type.name == 'void':
+				if _type.isref:
+					return 'IntPtr'
+				return 'void'
+		elif _type.name == 'status':
+			if dllImport:
+				return 'int'
+			else:
+				return 'void'
+		elif _type.name == 'boolean':
+			if dllImport:
+				res = 'char'
+			else:
+				res = 'bool'
+		elif _type.name == 'integer':
+			if _type.isUnsigned:
+				res = 'uint'
+			else:
+				res = 'int'
+		elif _type.name == 'string':
+			if dllImport:
+				if type(_type.parent) is Argument:
+					return 'string'
+				else:
+					res = 'IntPtr' # Return as IntPtr and get string with Marshal.PtrToStringAnsi()
+			else:
+				return 'string'
+		elif _type.name == 'character':
+			if _type.isUnsigned:
+				res = 'byte'
+			else:
+				res = 'sbyte'
+		elif _type.name == 'time':
+			res = 'long' #TODO check
+		elif _type.name == 'size':
+			res = 'long' #TODO check
+		elif _type.name == 'floatant':
+			return 'float'
+		elif _type.name == 'string_array':
+			if dllImport or type(_type.parent) is Argument:
+				return 'IntPtr'
+			else:
+				return 'IEnumerable<string>'
+		else:
+			raise TranslationError('\'{0}\' is not a base abstract type'.format(_type.name))
+		
+		return res
+	
+	def translate_enum_type(self, _type, dllImport=True, namespace=None):
+		if dllImport and type(_type.parent) is Argument:
+			return 'int'
+		else:
+			return _type.desc.name.translate(self.nameTranslator, **Translator._namespace_to_name_translator_params(namespace))
+	
+	def translate_class_type(self, _type, dllImport=True, namespace=None):
+		return "IntPtr" if dllImport else _type.desc.name.translate(self.nameTranslator, **Translator._namespace_to_name_translator_params(namespace))
+	
+	def translate_list_type(self, _type, dllImport=True, namespace=None):
+		if dllImport:
+			return 'IntPtr'
+		else:
+			if type(_type.containedTypeDesc) is BaseType:
+				if _type.containedTypeDesc.name == 'string':
+					return 'IEnumerable<string>'
+				else:
+					raise TranslationError('translation of bctbx_list_t of basic C types is not supported')
+			elif type(_type.containedTypeDesc) is ClassType:
+				ptrType = _type.containedTypeDesc.desc.name.translate(self.nameTranslator, **Translator._namespace_to_name_translator_params(namespace))
+				return 'IEnumerable<' + ptrType + '>'
+			else:
+				if _type.containedTypeDesc:
+					raise TranslationError('translation of bctbx_list_t of enums')
+				else:
+					raise TranslationError('translation of bctbx_list_t of unknow type !')
+	
+	def translate_argument(self, arg, dllImport=True, namespace=None):
+		return '{0} {1}'.format(
+			arg.type.translate(self, dllImport=dllImport, namespace=None),
+			arg.name.translate(self.nameTranslator)
+		)
+	
+	def translate_method_as_prototype(self, method, hideArguments=False, hideArgNames=False, hideReturnType=False, stripDeclarators=False, namespace=None):
+		return '{static}{override}{returnType}{name}({args})'.format(
+			static     = 'static ' if method.type == Method.Type.Class and not stripDeclarators else '',
+			override   = 'override ' if method.name.translate(self.nameTranslator) == 'ToString' and not stripDeclarators else '',
+			returnType = (method.returnType.translate(self, dllImport=False, namespace=namespace) + ' ') if not hideReturnType else '',
+			name       = method.name.translate(self.nameTranslator, **Translator._namespace_to_name_translator_params(namespace)),
+			args       = ', '.join([arg.translate(self, dllImport=False, namespace=namespace) for arg in method.args]) if not hideArguments else ''
+		)

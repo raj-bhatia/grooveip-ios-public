@@ -6,6 +6,9 @@
 //
 //
 
+#import <SafariServices/SafariServices.h>
+#import "linphone/core_utils.h"
+
 #import "SideMenuTableView.h"
 #import "Utils.h"
 
@@ -13,6 +16,12 @@
 #import "StatusBarView.h"
 #import "ShopView.h"
 #import "LinphoneManager.h"
+#if 1	// Changed Linphone code -
+#import "Secret.h"
+#endif
+
+@interface SideMenuTableView () <SFSafariViewControllerDelegate>
+@end
 
 @implementation SideMenuEntry
 
@@ -37,7 +46,7 @@
 }
 
 - (void)viewWillAppear:(BOOL)animated {
-	linphone_core_stop_dtmf(LC);
+	linphone_core_stop_dtmf_stream(LC);
 	[super viewWillAppear:animated];
 
 	_sideMenuEntries = [[NSMutableArray alloc] init];
@@ -59,6 +68,29 @@
 														changeCurrentView:AssistantLinkView.compositeViewDescription];
 												  }]];
 	}
+
+#if 1	// Changed Linphone code - Add a new item
+	LinphoneProxyConfig *default_proxy = linphone_core_get_default_proxy_config(LC);
+	int currency = linphone_proxy_config_get_snrblabs_currency(default_proxy);
+	if (0 <= currency) {	// 0 = Credits; 1 = Dollars
+		[_sideMenuEntries addObject:[[SideMenuEntry alloc] initWithTitle:NSLocalizedString(@"Account Management", nil)
+							tapBlock:^() {
+								NSString *url = PORTAL_URL;
+								if (0 == currency) {	// Link to buy credits
+									const char *email = linphone_proxy_config_get_snrblabs_email(default_proxy);
+									url = PAYPAL_URL;
+									url = [url stringByAppendingString : @"email="];
+									url = [url stringByAppendingString : [NSString stringWithUTF8String:email]];
+								}
+								SFSafariViewController *svc = [[SFSafariViewController alloc] initWithURL:[NSURL URLWithString:url]];
+								svc.delegate = self;
+								svc.preferredBarTintColor = UIColor.brownColor;
+								[[[[UIApplication sharedApplication] keyWindow] rootViewController] presentViewController:svc
+																												 animated:YES
+																											   completion:nil];
+							}]];
+	}
+#endif
 
 	[_sideMenuEntries
 		addObject:[[SideMenuEntry alloc] initWithTitle:NSLocalizedString(@"Settings", nil)
@@ -141,6 +173,10 @@
 		}
 	}
 	[PhoneMainView.instance.mainViewController hideSideMenu:YES];
+}
+
+- (void)safariViewControllerDidFinish:(SFSafariViewController *)controller {
+    [self dismissViewControllerAnimated:true completion:nil];
 }
 
 @end

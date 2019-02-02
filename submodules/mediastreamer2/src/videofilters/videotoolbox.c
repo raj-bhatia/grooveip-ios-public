@@ -71,8 +71,8 @@ const MSVideoConfiguration vth264enc_video_confs[] = {
 	MS_VIDEO_CONF( 800000,  2000000,       720P, 25, 2),
 	MS_VIDEO_CONF( 800000,  1536000,        XGA, 25, 2),
 	MS_VIDEO_CONF( 600000,  1024000,       SVGA, 25, 2),
-	MS_VIDEO_CONF( 350000,   600000,        VGA, 25, 2),
-	MS_VIDEO_CONF( 350000,   600000,        VGA, 15, 1),
+	MS_VIDEO_CONF( 800000,  3000000,        VGA, 30, 2),
+	MS_VIDEO_CONF( 400000,   800000,        VGA, 15, 1),
 	MS_VIDEO_CONF( 200000,   350000,        CIF, 18, 1),
 	MS_VIDEO_CONF( 150000,   200000,       QVGA, 15, 1),
 	MS_VIDEO_CONF( 100000,   150000,       QVGA, 10, 1),
@@ -188,7 +188,7 @@ static bool_t vth264enc_session_set_bitrate(VTCompressionSessionRef session, int
 		return FALSE;
 	}
 
-	int bytes_per_seconds = bitrate/8 * 2; /*allow to have 2 times the average bitrate in one second*/
+	int bytes_per_seconds = bitrate/8;
 	int dur = 1;
 	CFNumberRef bytes_value = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &bytes_per_seconds);
 	CFNumberRef duration_value = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &dur);
@@ -454,7 +454,7 @@ static int vth264enc_set_bitrate(MSFilter *f, const int *bitrate) {
 	VTH264EncCtx *ctx = (VTH264EncCtx *)f->data;
 	vth264enc_message("requested bitrate: %d bits/s", *bitrate);
 	if(ctx->session == NULL) {
-		ctx->conf = ms_video_find_best_configuration_for_bitrate(ctx->video_confs, *bitrate, f->factory->cpu_count);
+		ctx->conf = ms_video_find_best_configuration_for_size_and_bitrate(ctx->video_confs, ctx->conf.vsize, ms_factory_get_cpu_count(f->factory), *bitrate);
 		vth264enc_message("selected video conf: size=%dx%d, framerate=%ffps", ctx->conf.vsize.width, ctx->conf.vsize.height, ctx->conf.fps);
 	} else {
 		ms_filter_lock(f);
@@ -978,12 +978,18 @@ static int h264_dec_enable_avpf(MSFilter *f, const bool_t *enable) {
 	return 0;
 }
 
+static int h264_dec_freeze_on_error_enabled(MSFilter *f, bool_t *enabled) {
+	*enabled = ((VTH264DecCtx *)f->data)->freeze_on_error_enabled;
+	return 0;
+}
+
 static MSFilterMethod h264_dec_methods[] = {
 	{   MS_FILTER_GET_VIDEO_SIZE                           ,    (MSFilterMethodFunc)h264_dec_get_video_size                    },
 	{   MS_FILTER_GET_FPS                                  ,    (MSFilterMethodFunc)h264_dec_get_fps                           },
 	{   MS_FILTER_GET_OUTPUT_FMT                           ,    (MSFilterMethodFunc)h264_dec_get_output_fmt                    },
 	{   MS_VIDEO_DECODER_RESET_FIRST_IMAGE_NOTIFICATION    ,    (MSFilterMethodFunc)h264_dec_reset_first_image_notification    },
 	{   MS_VIDEO_DECODER_ENABLE_AVPF                       ,    (MSFilterMethodFunc)h264_dec_enable_avpf                       },
+	{	MS_VIDEO_DECODER_FREEZE_ON_ERROR_ENABLED           ,    (MSFilterMethodFunc)h264_dec_freeze_on_error_enabled           },
 	{   0                                                  ,    NULL                                                           }
 
 };

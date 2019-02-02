@@ -20,11 +20,14 @@
 #import <UIKit/UIKit.h>
 #include "linphone/linphonecore.h"
 
+#import "linphone/api/c-event-log.h"
+#import "linphone/api/c-chat-room.h"
+
 #import "UICheckBoxTableView.h"
 
 @protocol ChatConversationDelegate <NSObject>
 
-- (BOOL)startImageUpload:(UIImage *)image url:(NSURL *)url;
+- (BOOL)startImageUpload:(UIImage *)image url:(NSURL *)url withQuality:(float)quality;
 - (void)resendChat:(NSString *)message withExternalUrl:(NSString *)url;
 - (void)tableViewIsScrolling;
 
@@ -32,15 +35,15 @@
 
 @interface ChatConversationTableView : UICheckBoxTableView {
   @private
-	MSList *messageList;
+	NSMutableArray *eventList;
 }
 
 @property(nonatomic) LinphoneChatRoom *chatRoom;
 @property(nonatomic, strong) id<ChatConversationDelegate> chatRoomDelegate;
 
-- (void)addChatEntry:(LinphoneChatMessage *)chat;
+- (void)addEventEntry:(LinphoneEventLog *)event;
 - (void)scrollToBottom:(BOOL)animated;
 - (void)scrollToLastUnread:(BOOL)animated;
-- (void)updateChatEntry:(LinphoneChatMessage *)chat;
+- (void)updateEventEntry:(LinphoneEventLog *)event;
 
 @end

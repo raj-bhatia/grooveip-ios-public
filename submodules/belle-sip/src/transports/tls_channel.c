@@ -1,19 +1,19 @@
 /*
 	belle-sip - SIP (RFC3261) library.
-    Copyright (C) 2013  Belledonne Communications SARL
+	Copyright (C) 2010-2018  Belledonne Communications SARL
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 2 of the License, or
+	(at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "belle_sip_internal.h"
@@ -329,6 +329,7 @@ char *belle_sip_certificates_chain_get_fingerprint(belle_sip_certificates_chain_
 // length - length of certificate DER data
 // depth - position of certificate in cert chain, ending at 0 = root or top
 // flags - verification state for CURRENT certificate only
+// deprecated
 typedef int (*verify_cb_error_cb_t)(unsigned char* der, int length, int depth, uint32_t* flags);
 static verify_cb_error_cb_t tls_verify_cb_error_cb = NULL;
 
@@ -402,9 +403,9 @@ static int tls_channel_recv(belle_sip_channel_t *obj, void *buf, size_t buflen){
 
 static int tls_channel_connect_to(belle_sip_channel_t *obj, const struct addrinfo *ai){
 	int err;
-	
+
 	if (belle_sip_tls_channel_init_bctbx_ssl((belle_sip_tls_channel_t*)obj)==-1) return -1;
-	
+
 	err= stream_channel_connect((belle_sip_stream_channel_t*)obj,ai);
 	if (err==0){
 		belle_sip_source_set_notify((belle_sip_source_t *)obj, (belle_sip_source_func_t)tls_process_data);
@@ -413,7 +414,7 @@ static int tls_channel_connect_to(belle_sip_channel_t *obj, const struct addrinf
 	return -1;
 }
 
-static void http_proxy_res_done(void *data, const char *name, struct addrinfo *ai_list){
+static void http_proxy_res_done(void *data, const char *name, struct addrinfo *ai_list, uint32_t ttl){
 	belle_sip_tls_channel_t *obj=(belle_sip_tls_channel_t*)data;
 	if (obj->http_proxy_resolver_ctx){
 		belle_sip_object_unref(obj->http_proxy_resolver_ctx);
@@ -454,6 +455,8 @@ BELLE_SIP_INSTANCIATE_CUSTOM_VPTR_BEGIN(belle_sip_tls_channel_t)
 				(belle_sip_object_destroy_t)tls_channel_uninit,
 				NULL,
 				NULL,
+				(belle_sip_object_on_first_ref_t) NULL,
+				(belle_sip_object_on_last_ref_t) NULL,
 				BELLE_SIP_DEFAULT_BUFSIZE_HINT
 			},
 			"TLS",
@@ -497,19 +500,42 @@ static int belle_sip_client_certificate_request_callback(void *data, bctbx_ssl_c
 	return 0; /* we couldn't find any certificate, just keep on going, server may decide to abort the handshake */
 }
 
+static int tls_handle_postcheck(belle_sip_tls_channel_t* channel){
+	if (channel->crypto_config && channel->crypto_config->postcheck_cb){
+		const bctbx_x509_certificate_t *cert = bctbx_ssl_get_peer_certificate(channel->sslctx);
+		if (!cert){
+			belle_sip_error("tls_handle_postcheck(): no peer certificate, this should not happen");
+			return -1;
+		}
+		return channel->crypto_config->postcheck_cb(channel->crypto_config->postcheck_cb_data, cert);
+	}
+	return 0;
+}
+
 static int tls_process_handshake(belle_sip_channel_t *obj){
 	belle_sip_tls_channel_t* channel=(belle_sip_tls_channel_t*)obj;
+	char tmp[128];
 	int err=bctbx_ssl_handshake(channel->sslctx);
-	if (err==0){
+
+	memset(tmp, '\0', sizeof(tmp));
+	if (err == 0){
 		belle_sip_message("Channel [%p]: SSL handshake finished, SSL version is [%s], selected ciphersuite is [%s]",obj,
 				  bctbx_ssl_get_version(channel->sslctx), bctbx_ssl_get_ciphersuite(channel->sslctx));
+		err = tls_handle_postcheck(channel);
+		if (err != 0) {
+			snprintf(tmp, sizeof(tmp)-1, "%s", "application level post-check failed.");
+		}
+	}
+
+	if (err==0){
 		belle_sip_source_set_timeout((belle_sip_source_t*)obj,-1);
 		belle_sip_channel_set_ready(obj,(struct sockaddr*)&channel->ss,channel->socklen);
 	}else if (err==BCTBX_ERROR_NET_WANT_READ || err==BCTBX_ERROR_NET_WANT_WRITE){
 		belle_sip_message("Channel [%p]: SSL handshake in progress...",obj);
 	}else{
-		char tmp[128];
-		bctbx_strerror(err,tmp,sizeof(tmp));
+		if (tmp[0] == '\0'){
+			bctbx_strerror(err,tmp,sizeof(tmp));
+		}
 		belle_sip_error("Channel [%p]: SSL handshake failed : %s",obj,tmp);
 		return -1;
 	}
@@ -526,7 +552,7 @@ static int tls_process_http_connect(belle_sip_tls_channel_t *obj) {
 	int port;
 	bctbx_addrinfo_to_printable_ip_address(channel->current_peer,url_ipport,sizeof(url_ipport));
 	bctbx_addrinfo_to_ip_address(channel->current_peer,ip,sizeof(ip),&port);
-	
+
 	if (channel->current_peer->ai_family == AF_INET6) {
 		host_ip = belle_sip_strdup_printf("[%s]",ip);
 	} else {
@@ -536,7 +562,7 @@ static int tls_process_http_connect(belle_sip_tls_channel_t *obj) {
 	request = belle_sip_strdup_printf("CONNECT %s HTTP/1.1\r\nProxy-Connection: keep-alive\r\nConnection: keep-alive\r\nHost: %s\r\nUser-Agent: Mozilla/5.0\r\n"
 									  ,url_ipport
 									  ,host_ip);
-	
+
 	belle_sip_free(host_ip);
 
 	if (channel->stack->http_proxy_username && channel->stack->http_proxy_passwd) {
@@ -581,7 +607,7 @@ static int tls_process_data(belle_sip_channel_t *obj,unsigned int revents){
 				belle_sip_message("Channel [%p]: Connected at TCP level, now doing http proxy connect",obj);
 				if (tls_process_http_connect(channel)) goto process_error;
 			} else {
-				belle_sip_message("Channel [%p]: Connected at TCP level, now doing TLS handshake with cname=%s",obj, 
+				belle_sip_message("Channel [%p]: Connected at TCP level, now doing TLS handshake with cname=%s",obj,
 						  obj->peer_cname ? obj->peer_cname : obj->peer_name);
 				if (tls_process_handshake(obj)==-1) goto process_error;
 			}
@@ -596,7 +622,7 @@ static int tls_process_data(belle_sip_channel_t *obj,unsigned int revents){
 								,strerror(errno));
 				goto process_error;
 			} else if (strstr(response,"407")) {
-				belle_sip_error("Channel [%p]: auth requested, provide user/passwd by http proxy [%s:%i]"
+				belle_sip_error("Channel [%p]: auth requested, provide user/passwd for http proxy [%s:%i]"
 								,channel
 								,obj->stack->http_proxy_host
 								,obj->stack->http_proxy_port);
@@ -629,7 +655,8 @@ static int tls_process_data(belle_sip_channel_t *obj,unsigned int revents){
 	} else if ( obj->state == BELLE_SIP_CHANNEL_READY) {
 		return belle_sip_channel_process_data(obj,revents);
 	} else {
-		belle_sip_warning("Unexpected event [%i], for channel [%p]",revents,channel);
+		belle_sip_error("Unexpected event [%i], for channel [%p]",revents,channel);
+		channel_set_state(obj,BELLE_SIP_CHANNEL_ERROR);
 		return BELLE_SIP_STOP;
 	}
 	return BELLE_SIP_CONTINUE;
@@ -676,6 +703,7 @@ static int random_generator(void *ctx, unsigned char *ptr, size_t size){
 
 // shim the default certificate handling by adding an external callback
 // see "verify_cb_error_cb_t" for the function signature
+/*deprecated*/
 int belle_sip_tls_set_verify_error_cb(void * callback) {
 
 	if (callback) {
@@ -687,6 +715,7 @@ int belle_sip_tls_set_verify_error_cb(void * callback) {
 	}
 	return 0;
 }
+
 
 //
 // Augment certificate verification with certificates stored outside rootca.pem
@@ -755,6 +784,9 @@ static int belle_sip_ssl_verify(void *data , bctbx_x509_certificate_t *cert , in
 		bctbx_x509_certificate_unset_flag(flags, BCTBX_CERTIFICATE_VERIFY_BADCERT_CN_MISMATCH);
 	}
 
+	if (crypto_config->verify_cb){
+		crypto_config->verify_cb(crypto_config->verify_cb_data, cert, depth, flags);
+	}
 	ret = belle_sip_verify_cb_error_wrapper(cert, depth, flags);
 
 	belle_sip_free(flags_str);
@@ -823,13 +855,13 @@ static void belle_sip_tls_channel_deinit_bctbx_ssl(belle_sip_tls_channel_t *obj)
 		bctbx_x509_certificate_free(obj->root_ca);
 		obj->root_ca = NULL;
 	}
-	
+
 }
 
 static int belle_sip_tls_channel_init_bctbx_ssl(belle_sip_tls_channel_t *obj){
 	belle_sip_stream_channel_t* super=(belle_sip_stream_channel_t*)obj;
 	belle_tls_crypto_config_t *crypto_config = obj->crypto_config;
-	
+
 	/* create and initialise ssl context and configuration */
 	obj->sslctx = bctbx_ssl_context_new();
 	obj->sslcfg = bctbx_ssl_config_new();

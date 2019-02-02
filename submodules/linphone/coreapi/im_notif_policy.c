@@ -18,8 +18,11 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
 #include "linphone/core.h"
-#include "private.h"
 
+#include "c-wrapper/c-wrapper.h"
+
+// TODO: From coreapi. Remove me later.
+#include "private.h"
 
 BELLE_SIP_DECLARE_NO_IMPLEMENTED_INTERFACES(LinphoneImNotifPolicy);
 
@@ -30,9 +33,8 @@ BELLE_SIP_INSTANCIATE_VPTR(LinphoneImNotifPolicy, belle_sip_object_t,
 	FALSE
 );
 
-
 static void load_im_notif_policy_from_config(LinphoneImNotifPolicy *policy) {
-	bctbx_list_t *default_list = bctbx_list_append(NULL, "all");
+	bctbx_list_t *default_list = bctbx_list_append(NULL, (void *)"all");
 	bctbx_list_t *values = lp_config_get_string_list(policy->lc->config, "sip", "im_notif_policy", default_list);
 	bctbx_list_t *elem;
 
@@ -87,20 +89,20 @@ static void save_im_notif_policy_to_config(LinphoneImNotifPolicy *policy) {
 		&& (policy->recv_imdn_delivered == FALSE)
 		&& (policy->send_imdn_displayed == FALSE)
 		&& (policy->recv_imdn_displayed == FALSE)) {
-		values = bctbx_list_append(values, "none");
+		values = bctbx_list_append(values, (void *)"none");
 	} else {
 		if (policy->send_is_composing == TRUE)
-			values = bctbx_list_append(values, "send_is_comp");
+			values = bctbx_list_append(values, (void *)"send_is_comp");
 		if (policy->recv_is_composing == TRUE)
-			values = bctbx_list_append(values, "recv_is_comp");
+			values = bctbx_list_append(values, (void *)"recv_is_comp");
 		if (policy->send_imdn_delivered == TRUE)
-			values = bctbx_list_append(values, "send_imdn_delivered");
+			values = bctbx_list_append(values, (void *)"send_imdn_delivered");
 		if (policy->recv_imdn_delivered == TRUE)
-			values = bctbx_list_append(values, "recv_imdn_delivered");
+			values = bctbx_list_append(values, (void *)"recv_imdn_delivered");
 		if (policy->send_imdn_displayed == TRUE)
-			values = bctbx_list_append(values, "send_imdn_displayed");
+			values = bctbx_list_append(values, (void *)"send_imdn_displayed");
 		if (policy->recv_imdn_displayed == TRUE)
-			values = bctbx_list_append(values, "recv_imdn_displayed");
+			values = bctbx_list_append(values, (void *)"recv_imdn_displayed");
 	}
 	lp_config_set_string_list(policy->lc->config, "sip", "im_notif_policy", values);
 	if (values != NULL) bctbx_list_free(values);
@@ -203,6 +205,8 @@ LinphoneImNotifPolicy * linphone_core_get_im_notif_policy(const LinphoneCore *lc
 }
 
 void linphone_core_create_im_notif_policy(LinphoneCore *lc) {
+	if (lc->im_notif_policy)
+		linphone_im_notif_policy_unref(lc->im_notif_policy);
 	lc->im_notif_policy = belle_sip_object_new(LinphoneImNotifPolicy);
 	lc->im_notif_policy->lc = lc;
 	load_im_notif_policy_from_config(lc->im_notif_policy);

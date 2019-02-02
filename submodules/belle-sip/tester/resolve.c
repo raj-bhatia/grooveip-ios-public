@@ -18,17 +18,11 @@
 
 #include <stdio.h>
 
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <string.h>
-
 #include "belle-sip/belle-sip.h"
 
 static belle_sip_stack_t *stack;
 
-static void resolver_callback(void *data, const char *queried_name, struct addrinfo *ai_list){
+static void resolver_callback(void *data, const char *queried_name, struct addrinfo *ai_list, unsigned int ttl){
 	int err;
 	struct addrinfo *ai_it;
 	char name[NI_MAXHOST];
@@ -39,8 +33,11 @@ static void resolver_callback(void *data, const char *queried_name, struct addri
 		if (err!=0){
 			fprintf(stderr,"getnameinfo error: %s",gai_strerror(err));
 		}else{
-			printf("\t%s %s\n",name,port);
+			printf("\t%s %s  (ttl:%u)\n",name,port,ttl);
 		}
+	}
+	if (ai_list){
+		bctbx_freeaddrinfo(ai_list);
 	}
 	belle_sip_main_loop_quit(belle_sip_stack_get_main_loop(stack));
 }

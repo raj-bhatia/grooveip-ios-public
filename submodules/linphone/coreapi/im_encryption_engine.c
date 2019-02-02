@@ -18,8 +18,9 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 */
 
 #include "linphone/core.h"
-#include "linphone/im_encryption_engine.h"
 #include "private.h"
+
+#include "c-wrapper/c-wrapper.h"
 
 BELLE_SIP_DECLARE_NO_IMPLEMENTED_INTERFACES(LinphoneImEncryptionEngineCbs);
 
@@ -66,10 +67,10 @@ void linphone_im_encryption_engine_cbs_set_user_data(LinphoneImEncryptionEngineC
 	cbs->user_data = data;
 }
 
-LinphoneImEncryptionEngine *linphone_im_encryption_engine_new(LinphoneCore *lc) {
+LinphoneImEncryptionEngine *linphone_im_encryption_engine_new(void) {
 	LinphoneImEncryptionEngine *imee = belle_sip_object_new(LinphoneImEncryptionEngine);
 	belle_sip_object_ref(imee);
-	imee->lc = lc;
+	imee->lc = NULL;
 	imee->callbacks = linphone_im_encryption_engine_cbs_new();
 	return imee;
 }

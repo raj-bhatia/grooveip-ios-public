@@ -21,7 +21,7 @@
 ############################################################################
 
 cmake_minimum_required(VERSION 3.0)
-project(mssilk VERSION 1.1.0 LANGUAGES C)
+project(mssilk VERSION 1.1.1 LANGUAGES C)
 
 
 option(ENABLE_SHARED "Build shared library." YES)
@@ -37,9 +37,11 @@ endif()
 
 if(LINPHONE_BUILDER_GROUP_EXTERNAL_SOURCE_PATH_BUILDERS)
 	include("${EP_ms2_CONFIG_DIR}/Mediastreamer2Config.cmake")
+	include("${EP_bctoolbox_CONFIG_DIR}/BcToolboxConfig.cmake")
 	include("${EP_ortp_CONFIG_DIR}/OrtpConfig.cmake")
 else()
 	find_package(Mediastreamer2 REQUIRED)
+	find_package(BCTOOLBOX REQUIRED)
 	find_package(ORTP REQUIRED)
 endif()
 
@@ -57,7 +59,7 @@ include_directories(
 add_definitions(-DVERSION=\"${PROJECT_VERSION}\")
 
 
-set(LIBS ${MEDIASTREAMER2_LIBRARIES} ${ORTP_LIBRARIES})
+set(LIBS ${MEDIASTREAMER2_LIBRARIES} ${ORTP_LIBRARIES} ${BCTOOLBOX_CORE_LIBRARIES})
 
 set(SOURCE_FILES
 	${SILK_SOURCE_FILES}
@@ -107,3 +109,14 @@ if(ENABLE_SHARED)
 		PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
 	)
 endif()
+
+
+# CPack settings
+set(CPACK_SOURCE_GENERATOR "TGZ")
+set(CPACK_SOURCE_PACKAGE_FILE_NAME "${PROJECT_NAME}-${PROJECT_VERSION}")
+set(CPACK_SOURCE_IGNORE_FILES
+	"^${CMAKE_BINARY_DIR}"
+	"/\\\\..+"
+)
+
+include(CPack)

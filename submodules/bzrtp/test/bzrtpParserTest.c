@@ -31,7 +31,7 @@
 #include "cryptoUtils.h"
 #include "zidCache.h"
 #include "testUtils.h"
-#include <bctoolbox/tester.h>
+#include "bzrtpTest.h"
 
 #ifndef _WIN32
 #include <time.h>
@@ -180,9 +180,10 @@ void test_parser_param(uint8_t hvi_trick) {
 		if (hvi_trick==0) {
 			BC_ASSERT_EQUAL(retval, 0, int, "%d");
 			if (retval != 0) goto error;
-		} else { /* when hvi trick is enable, the DH2 parsing shall fail and return BZRTP_PARSER_ERROR_UNMATCHINGHVI */
+		} else { /* when hvi trick is enabled, the DH2 parsing shall fail and return BZRTP_PARSER_ERROR_UNMATCHINGHVI */
 			if (zrtpPacket->messageType==MSGTYPE_DHPART2) {
 				BC_ASSERT_EQUAL(retval, BZRTP_PARSER_ERROR_UNMATCHINGHVI, int, "%d");
+				bzrtp_freeZrtpPacket(zrtpPacket);
 				goto error;
 			} else {
 				BC_ASSERT_EQUAL(retval, 0, int, "%d");
@@ -241,10 +242,6 @@ void test_parser_param(uint8_t hvi_trick) {
 			BC_FAIL("Unable to build packet");
 		}
 
-		if (freePacketFlag == 1) {
-			bzrtp_freeZrtpPacket(zrtpPacket);
-		}
-
 		/* modify the hvi stored in the peerPackets, this shall result in parsing failure on DH2 packet */
 		if (hvi_trick == 1) {
 			if (zrtpPacket->messageType==MSGTYPE_COMMIT) {
@@ -254,6 +251,10 @@ void test_parser_param(uint8_t hvi_trick) {
 					peerCommitMessageData->hvi[0]=0xFF;
 				}
 			}
+		}
+
+		if (freePacketFlag == 1) {
+			bzrtp_freeZrtpPacket(zrtpPacket);
 		}
 
 	}
@@ -267,11 +268,11 @@ error:
 	bzrtp_destroyBzrtpContext(context12345678, 0x12345678);
 }
 
-void test_parser(void) {
+static void test_parser(void) {
 	test_parser_param(0);
 }
 
-void test_parser_hvi(void) {
+static void test_parser_hvi(void) {
 	test_parser_param(1);
 }
 
@@ -283,7 +284,7 @@ typedef struct my_Context_struct {
 } my_Context_t;
 
 
-void test_parserComplete() {
+static void test_parserComplete() {
 
 	int retval;
 	/* alice's maintained packet */
@@ -348,17 +349,11 @@ void test_parserComplete() {
 	bzrtp_initBzrtpContext(contextBob, 0x87654321); /* Bob's SSRC of main channel is 87654321 */
 
 
-	/* now create Alice and BOB Hello packet */
-	alice_Hello = bzrtp_createZrtpPacket(contextAlice, contextAlice->channelContext[0], MSGTYPE_HELLO, &retval);
-	if (bzrtp_packetBuild(contextAlice, contextAlice->channelContext[0], alice_Hello, contextAlice->channelContext[0]->selfSequenceNumber) ==0) {
-		contextAlice->channelContext[0]->selfSequenceNumber++;
-		contextAlice->channelContext[0]->selfPackets[HELLO_MESSAGE_STORE_ID] = alice_Hello;
-	}
-	bob_Hello = bzrtp_createZrtpPacket(contextBob, contextBob->channelContext[0], MSGTYPE_HELLO, &retval);
-	if (bzrtp_packetBuild(contextBob, contextBob->channelContext[0], bob_Hello, contextBob->channelContext[0]->selfSequenceNumber) ==0) {
-		contextBob->channelContext[0]->selfSequenceNumber++;
-		contextBob->channelContext[0]->selfPackets[HELLO_MESSAGE_STORE_ID] = bob_Hello;
-	}
+	/* Hello packets are built during the context init(but we must still increase their sequence Number) */
+	alice_Hello = contextAlice->channelContext[0]->selfPackets[HELLO_MESSAGE_STORE_ID];
+	bob_Hello = contextBob->channelContext[0]->selfPackets[HELLO_MESSAGE_STORE_ID];
+	contextAlice->channelContext[0]->selfSequenceNumber++;
+	contextBob->channelContext[0]->selfSequenceNumber++;
 
 	/* now send Alice Hello's to Bob and vice-versa, so they parse them */
 	alice_HelloFromBob = bzrtp_packetCheck(bob_Hello->packetString, bob_Hello->messageLength+16, contextAlice->channelContext[0]->peerSequenceNumber, &retval);
@@ -706,9 +701,19 @@ void test_parserComplete() {
 
 	/* Now Alice shall check that the PV from bob is not 1 or Prime-1 TODO*/
 	/* Compute the shared DH secret */
-	contextAlice->DHMContext->peer = (uint8_t *)malloc(contextAlice->channelContext[0]->keyAgreementLength*sizeof(uint8_t));
-	memcpy (contextAlice->DHMContext->peer, alice_DHPart1FromBob_message->pv, contextAlice->channelContext[0]->keyAgreementLength);
-	bctbx_DHMComputeSecret(contextAlice->DHMContext, (int (*)(void *, uint8_t *, size_t))bctbx_rng_get, (void *)contextAlice->RNGContext);
+	if (contextAlice->keyAgreementAlgo == ZRTP_KEYAGREEMENT_DH2k || contextAlice->keyAgreementAlgo == ZRTP_KEYAGREEMENT_DH3k) {
+		bctbx_DHMContext_t *DHMContext = (bctbx_DHMContext_t *)(contextAlice->keyAgreementContext);
+		DHMContext->peer = (uint8_t *)malloc(contextAlice->channelContext[0]->keyAgreementLength*sizeof(uint8_t));
+		memcpy (DHMContext->peer, alice_DHPart1FromBob_message->pv, contextAlice->channelContext[0]->keyAgreementLength);
+		bctbx_DHMComputeSecret(DHMContext, (int (*)(void *, uint8_t *, size_t))bctbx_rng_get, (void *)contextAlice->RNGContext);
+	}
+	if (contextAlice->keyAgreementAlgo == ZRTP_KEYAGREEMENT_X255 || contextAlice->keyAgreementAlgo == ZRTP_KEYAGREEMENT_X448) {
+		bctbx_ECDHContext_t *ECDHContext = (bctbx_ECDHContext_t *)(contextAlice->keyAgreementContext);
+		ECDHContext->peerPublic = (uint8_t *)malloc(contextAlice->channelContext[0]->keyAgreementLength*sizeof(uint8_t));
+		memcpy (ECDHContext->peerPublic, alice_DHPart1FromBob_message->pv, contextAlice->channelContext[0]->keyAgreementLength);
+		bctbx_ECDHComputeSecret(ECDHContext, (int (*)(void *, uint8_t *, size_t))bctbx_rng_get, (void *)contextAlice->RNGContext);
+	}
+
 
 	/* So Alice send bob her DHPart2 message which is already prepared and stored (we just need to update the sequence number) */
 	bzrtp_packetUpdateSequenceNumber(contextAlice->channelContext[0]->selfPackets[DHPART_MESSAGE_STORE_ID], contextAlice->channelContext[0]->selfSequenceNumber);
@@ -760,19 +765,44 @@ void test_parserComplete() {
 
 	/* Now Bob shall check that the PV from Alice is not 1 or Prime-1 TODO*/
 	/* Compute the shared DH secret */
-	contextBob->DHMContext->peer = (uint8_t *)malloc(contextBob->channelContext[0]->keyAgreementLength*sizeof(uint8_t));
-	memcpy (contextBob->DHMContext->peer, bob_DHPart2FromAlice_message->pv, contextBob->channelContext[0]->keyAgreementLength);
-	bctbx_DHMComputeSecret(contextBob->DHMContext, (int (*)(void *, uint8_t *, size_t))bctbx_rng_get, (void *)contextAlice->RNGContext);
-
+	if (contextBob->keyAgreementAlgo == ZRTP_KEYAGREEMENT_DH2k || contextBob->keyAgreementAlgo == ZRTP_KEYAGREEMENT_DH3k) {
+		bctbx_DHMContext_t *DHMContext = (bctbx_DHMContext_t *)(contextBob->keyAgreementContext);
+		DHMContext->peer = (uint8_t *)malloc(contextBob->channelContext[0]->keyAgreementLength*sizeof(uint8_t));
+		memcpy (DHMContext->peer, bob_DHPart2FromAlice_message->pv, contextBob->channelContext[0]->keyAgreementLength);
+		bctbx_DHMComputeSecret(DHMContext, (int (*)(void *, uint8_t *, size_t))bctbx_rng_get, (void *)contextAlice->RNGContext);
+	}
+	if (contextBob->keyAgreementAlgo == ZRTP_KEYAGREEMENT_X255 || contextBob->keyAgreementAlgo == ZRTP_KEYAGREEMENT_X448) {
+		bctbx_ECDHContext_t *ECDHContext = (bctbx_ECDHContext_t *)(contextBob->keyAgreementContext);
+		ECDHContext->peerPublic = (uint8_t *)malloc(contextBob->channelContext[0]->keyAgreementLength*sizeof(uint8_t));
+		memcpy (ECDHContext->peerPublic, bob_DHPart2FromAlice_message->pv, contextBob->channelContext[0]->keyAgreementLength);
+		bctbx_ECDHComputeSecret(ECDHContext, (int (*)(void *, uint8_t *, size_t))bctbx_rng_get, (void *)contextAlice->RNGContext);
+	}
 
 	/* JUST FOR TEST: check that the generated secrets are the same */
 	secretLength = bob_DHPart2FromAlice->messageLength-84; /* length of generated secret is the same than public value */
-	if (memcmp(contextBob->DHMContext->key, contextAlice->DHMContext->key, secretLength)==0) {
-		bzrtp_message("Secret Key correctly exchanged \n");
-		BC_PASS("Secret Key exchange OK");
-	} else {
-		BC_FAIL("Secret Key exchange failed");
-		bzrtp_message("ERROR : secretKey exchange failed!!\n");
+	if (contextBob->keyAgreementAlgo == ZRTP_KEYAGREEMENT_DH2k || contextBob->keyAgreementAlgo == ZRTP_KEYAGREEMENT_DH3k) {
+		bctbx_DHMContext_t *DHMContextAlice = (bctbx_DHMContext_t *)(contextAlice->keyAgreementContext);
+		bctbx_DHMContext_t *DHMContextBob = (bctbx_DHMContext_t *)(contextBob->keyAgreementContext);
+
+		if (memcmp(DHMContextBob->key, DHMContextAlice->key, secretLength)==0) {
+			bzrtp_message("Secret Key correctly exchanged \n");
+			BC_PASS("Secret Key exchange OK");
+		} else {
+			BC_FAIL("Secret Key exchange failed");
+			bzrtp_message("ERROR : secretKey exchange failed!!\n");
+		}
+	}
+	if (contextAlice->keyAgreementAlgo == ZRTP_KEYAGREEMENT_X255 || contextAlice->keyAgreementAlgo == ZRTP_KEYAGREEMENT_X448) {
+		bctbx_ECDHContext_t *ECDHContextAlice = (bctbx_ECDHContext_t *)(contextAlice->keyAgreementContext);
+		bctbx_ECDHContext_t *ECDHContextBob = (bctbx_ECDHContext_t *)(contextBob->keyAgreementContext);
+
+		if (memcmp(ECDHContextBob->sharedSecret, ECDHContextAlice->sharedSecret, secretLength)==0) {
+			bzrtp_message("Secret Key correctly exchanged \n");
+			BC_PASS("Secret Key exchange OK");
+		} else {
+			BC_FAIL("Secret Key exchange failed");
+			bzrtp_message("ERROR : secretKey exchange failed!!\n");
+		}
 	}
 
 	/* now compute the total_hash as in rfc section 4.4.1.4
@@ -847,7 +877,14 @@ void test_parserComplete() {
 	dataToHash[3] = 0x01;
 	hashDataIndex = 4;
 
-	memcpy(dataToHash+hashDataIndex, contextAlice->DHMContext->key, secretLength);
+	if (contextAlice->keyAgreementAlgo == ZRTP_KEYAGREEMENT_DH2k || contextAlice->keyAgreementAlgo == ZRTP_KEYAGREEMENT_DH3k) {
+		bctbx_DHMContext_t *DHMContext = (bctbx_DHMContext_t *)(contextAlice->keyAgreementContext);
+		memcpy(dataToHash+hashDataIndex, DHMContext->key, secretLength);
+	}
+	if (contextAlice->keyAgreementAlgo == ZRTP_KEYAGREEMENT_X255 || contextAlice->keyAgreementAlgo == ZRTP_KEYAGREEMENT_X448) {
+		bctbx_ECDHContext_t *ECDHContext = (bctbx_ECDHContext_t *)(contextAlice->keyAgreementContext);
+		memcpy(dataToHash+hashDataIndex, ECDHContext->sharedSecret, secretLength);
+	}
 	hashDataIndex += secretLength;
 	memcpy(dataToHash+hashDataIndex, "ZRTP-HMAC-KDF", 13);
 	hashDataIndex += 13;
@@ -941,7 +978,15 @@ void test_parserComplete() {
 	dataToHash[3] = 0x01;
 	hashDataIndex = 4;
 
-	memcpy(dataToHash+hashDataIndex, contextBob->DHMContext->key, secretLength);
+	if (contextBob->keyAgreementAlgo == ZRTP_KEYAGREEMENT_DH2k || contextBob->keyAgreementAlgo == ZRTP_KEYAGREEMENT_DH3k) {
+		bctbx_DHMContext_t *DHMContext = (bctbx_DHMContext_t *)(contextBob->keyAgreementContext);
+		memcpy(dataToHash+hashDataIndex, DHMContext->key, secretLength);
+	}
+	if (contextBob->keyAgreementAlgo == ZRTP_KEYAGREEMENT_X255 || contextBob->keyAgreementAlgo == ZRTP_KEYAGREEMENT_X448) {
+		bctbx_ECDHContext_t *ECDHContext = (bctbx_ECDHContext_t *)(contextBob->keyAgreementContext);
+		memcpy(dataToHash+hashDataIndex, ECDHContext->sharedSecret, secretLength);
+	}
+
 	hashDataIndex += secretLength;
 	memcpy(dataToHash+hashDataIndex, "ZRTP-HMAC-KDF", 13);
 	hashDataIndex += 13;
@@ -1584,7 +1629,7 @@ static void sleepMs(int ms){
 /* Ping message length is 24 bytes (already define in packetParser.c out of this scope) */
 #define ZRTP_PINGMESSAGE_FIXED_LENGTH 24
 
-void test_stateMachine() {
+static void test_stateMachine() {
 	int retval;
 	my_Context_t aliceClientData, bobClientData;
 	uint64_t initialTime;
@@ -1795,7 +1840,7 @@ void test_stateMachine() {
 }
 
 /* first parse a packet and then try good and bad zrtp-hash, then do it the other way : set the zrtp-hash and then parse packet */
-void test_zrtphash(void) {
+static void test_zrtphash(void) {
 	bzrtpPacket_t *zrtpPacket;
 	int retval;
 
@@ -1832,4 +1877,26 @@ void test_zrtphash(void) {
 	BC_ASSERT_EQUAL(retval, 0, int, "%d");
 	retval = bzrtp_packetParser(context12345678, context12345678->channelContext[0], HelloPacketZrtpHash, sizeof(HelloPacketZrtpHash), zrtpPacket);
 	BC_ASSERT_EQUAL(retval, 0, int, "%d");
+
+	/* cleaning */
+	bzrtp_destroyBzrtpContext(context12345678, 0x12345678);
+	bzrtp_freeZrtpPacket(zrtpPacket);
 }
+
+static test_t packet_parser_tests[] = {
+	TEST_NO_TAG("Parse", test_parser),
+	TEST_NO_TAG("Parse hvi check fail", test_parser_hvi),
+	TEST_NO_TAG("Parse Exchange", test_parserComplete),
+	TEST_NO_TAG("State machine", test_stateMachine),
+	TEST_NO_TAG("ZRTP-hash", test_zrtphash)
+};
+
+test_suite_t packet_parser_test_suite = {
+	"Packet Parser",
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	sizeof(packet_parser_tests) / sizeof(packet_parser_tests[0]),
+	packet_parser_tests
+};

@@ -49,6 +49,7 @@ extern "C" {
 
 struct _RingStream
 {
+	MSSndCard *card;
 	MSTicker *ticker;
 	MSFilter *source;
 	MSFilter *gendtmf;
@@ -136,6 +137,7 @@ struct _MediaStream {
 	 * defines encoder target network bit rate, uses #media_stream_set_target_network_bitrate() setter.
 	 * */
 	int target_bitrate;
+	int max_target_bitrate;
 	media_stream_process_rtcp_callback_t process_rtcp;
 	OrtpEvDispatcher *evd;
 	MSFactory *factory;
@@ -227,6 +229,15 @@ MS2_PUBLIC float media_stream_get_average_lq_quality_rating(MediaStream *stream)
  * @return 0 if succeed
  * */
 MS2_PUBLIC int media_stream_set_target_network_bitrate(MediaStream *stream,int target_bitrate);
+
+/**
+ * Set a maximum target bitrate for the stream. Indeed, the MSBandwidthController may adapt the target bitrate
+ * according to network conditions, which includes the possibility to increase it if remote side sends a TMMBR
+ * to invite to increase bitrate. The max_network_bitrate defines the upper limit for increasing the bitrate usage automatically.
+ * @param stream stream to apply parameter on
+ * @param target_bitrate in bit per seconds
+**/
+MS2_PUBLIC int media_stream_set_max_network_bitrate(MediaStream *stream,int max_bitrate);
 
 /**
  * get the stream target bitrate.
@@ -341,7 +352,7 @@ typedef struct _MSMediaStreamIO {
 	MSMediaResource output;
 } MSMediaStreamIO;
 
-#define MS_MEDIA_STREAM_IO_INITIALIZER { {0}, {0} }
+#define MS_MEDIA_STREAM_IO_INITIALIZER { {MSResourceInvalid}, {MSResourceInvalid} }
 
 MS2_PUBLIC bool_t ms_media_stream_io_is_consistent(const MSMediaStreamIO *io);
 
@@ -384,6 +395,7 @@ struct _AudioStream
 		int videopin;
 		bool_t plumbed;
 	}av_player;
+	MSFilter *flowcontrol;
 	RtpSession *rtp_io_session; /**< The RTP session used for RTP input/output. */
 	MSFilter *vaddtx;
 	char *recorder_file;
@@ -512,6 +524,7 @@ MS2_PUBLIC AudioStream *audio_stream_new_with_sessions(MSFactory* factory, const
 #define AUDIO_STREAM_FEATURE_MIXED_RECORDING	(1 << 7)
 #define AUDIO_STREAM_FEATURE_LOCAL_PLAYING	(1 << 8)
 #define AUDIO_STREAM_FEATURE_REMOTE_PLAYING	(1 << 9)
+#define AUDIO_STREAM_FEATURE_FLOW_CONTROL	(1 << 10)
 
 #define AUDIO_STREAM_FEATURE_ALL	(\
 					AUDIO_STREAM_FEATURE_PLC | \
@@ -523,7 +536,8 @@ MS2_PUBLIC AudioStream *audio_stream_new_with_sessions(MSFactory* factory, const
 					AUDIO_STREAM_FEATURE_DTMF_ECHO |\
 					AUDIO_STREAM_FEATURE_MIXED_RECORDING |\
 					AUDIO_STREAM_FEATURE_LOCAL_PLAYING | \
-					AUDIO_STREAM_FEATURE_REMOTE_PLAYING \
+					AUDIO_STREAM_FEATURE_REMOTE_PLAYING | \
+					AUDIO_STREAM_FEATURE_FLOW_CONTROL \
 					)
 
 
@@ -805,8 +819,9 @@ struct _VideoStream
 	MSFilter *local_jpegwriter;
 	MSVideoSize sent_vsize;
 	MSVideoSize preview_vsize;
-	float fps; /*the target fps explicitely set by application, overrides internally selected fps*/
+	float forced_fps; /*the target fps explicitely set by application, overrides internally selected fps*/
 	float configured_fps; /*the fps that was configured to the encoder. It might be different from the one really obtained from camera.*/
+	float real_fps; /*the fps obtained from camera.*/
 	int corner; /*for selfview*/
 	VideoStreamRenderCallback rendercb;
 	void *render_pointer;
@@ -831,7 +846,6 @@ struct _VideoStream
 	bool_t output_performs_decoding;
 	bool_t player_active;
 	bool_t staticimage_webcam_fps_optimization; /* if TRUE, the StaticImage webcam will ignore the fps target in order to save CPU time. Default is TRUE */
-	
 };
 
 typedef struct _VideoStream VideoStream;
@@ -1295,6 +1309,8 @@ MS2_PUBLIC void text_stream_unprepare_text(TextStream *stream);
 /**
  * @}
 **/
+
+MS2_PUBLIC void update_bitrate_limit_from_tmmbr(MediaStream *obj, int br_limit);
 
 #ifdef __cplusplus
 }

@@ -63,9 +63,7 @@ typedef struct msgb
 	unsigned char *b_wptr;
 	uint32_t reserved1;
 	uint32_t reserved2;
-#if defined(ORTP_TIMESTAMP)
 	struct timeval timestamp;
-#endif
 	ortp_recv_addr_t recv_addr; /*contains the destination address of incoming packets, used for ICE processing*/
 	struct sockaddr_storage net_addr; /*source address of incoming packet, or dest address of outgoing packet, used only by simulator and modifiers*/
 	socklen_t net_addrlen; /*source (dest) address of incoming (outgoing) packet length used by simulator and modifiers*/
@@ -148,6 +146,10 @@ ORTP_PUBLIC mblk_t * appendb(mblk_t *mp, const char *data, size_t size, bool_t p
 ORTP_PUBLIC void msgappend(mblk_t *mp, const char *data, size_t size, bool_t pad);
 
 ORTP_PUBLIC mblk_t *concatb(mblk_t *mp, mblk_t *newm);
+
+/*Make sure the message has a unique owner, if not duplicate the underlying data buffer so that it can be changed without impacting others.
+ Note that in case of copy, the message will be un-fragmented, exactly the way msgpullup() does. Always returns mp.*/
+ORTP_PUBLIC mblk_t * msgown(mblk_t *mp);
 
 #define qempty(q) (&(q)->_q_stopper==(q)->_q_stopper.b_next)
 #define qfirst(q) ((q)->_q_stopper.b_next!=&(q)->_q_stopper ? (q)->_q_stopper.b_next : NULL)

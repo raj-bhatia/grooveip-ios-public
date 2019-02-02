@@ -20,32 +20,58 @@
 #
 ############################################################################
 
+set(LIBS ${BCTOOLBOX_CORE_LIBRARIES})
+
 set(BELR_HEADER_FILES )
 set(BELR_SOURCE_FILES_C )
-set(BELR_SOURCE_FILES_CXX 
-	abnf.cc
-	belr.cc
-	grammarbuilder.cc
-	parser.cc
+set(BELR_SOURCE_FILES_CXX
+	abnf.cpp
+	belr.cpp
+	grammarbuilder.cpp
+	parser.cpp
+	binarystream.cpp
 )
 
 bc_apply_compile_flags(BELR_SOURCE_FILES_C STRICT_OPTIONS_CPP STRICT_OPTIONS_C)
 bc_apply_compile_flags(BELR_SOURCE_FILES_CXX STRICT_OPTIONS_CPP STRICT_OPTIONS_CXX)
 
+add_definitions(
+	-DBCTBX_LOG_DOMAIN="belr"
+)
+
+if(WIN32 AND NOT CMAKE_SYSTEM_NAME STREQUAL "WindowsStore")
+	list(APPEND LIBS ws2_32)
+endif()
+
 if(ENABLE_STATIC)
 	add_library(belr-static STATIC ${BELR_HEADER_FILES} ${BELR_SOURCE_FILES_C} ${BELR_SOURCE_FILES_CXX})
 	set_target_properties(belr-static PROPERTIES OUTPUT_NAME belr)
 	target_include_directories(belr-static PUBLIC ${BCTOOLBOX_CORE_INCLUDE_DIRS})
-	target_link_libraries(belr-static INTERFACE ${BCTOOLBOX_CORE_LIBRARIES})
+	target_link_libraries(belr-static INTERFACE ${LIBS})
 endif()
 if(ENABLE_SHARED)
 	add_library(belr SHARED ${BELR_HEADER_FILES} ${BELR_SOURCE_FILES_C} ${BELR_SOURCE_FILES_CXX})
 	if(APPLE)
 		set_target_properties(belr PROPERTIES LINK_FLAGS "-stdlib=libc++")
 	endif()
+	#TODO: replace by if(APPLE) when we want to make apple framework on linphone-desktop too
+	if(IOS)
+		if(IOS)
+			set(MIN_OS ${LINPHONE_IOS_DEPLOYMENT_TARGET})
+		else()
+			set(MIN_OS ${CMAKE_OSX_DEPLOYMENT_TARGET})
+		endif()
+		set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/build/osx/")
+		set_target_properties(belr PROPERTIES
+			FRAMEWORK TRUE
+			MACOSX_FRAMEWORK_IDENTIFIER org.linphone.belr
+			MACOSX_FRAMEWORK_INFO_PLIST Info.plist.in
+			PUBLIC_HEADER "${BELR_HEADER_FILES}"
+		)
+	endif()
 	set_target_properties(belr PROPERTIES VERSION ${BELR_SO_VERSION})
 	target_include_directories(belr PUBLIC ${BCTOOLBOX_CORE_INCLUDE_DIRS})
-	target_link_libraries(belr PRIVATE ${BCTOOLBOX_CORE_LIBRARIES})
+	target_link_libraries(belr PRIVATE ${LIBS})
 	if(MSVC)
 		if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
 			install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}/belr.pdb
@@ -69,6 +95,7 @@ if(ENABLE_SHARED)
 		RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 		LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 		ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+		FRAMEWORK DESTINATION Frameworks
 		PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
 	)
 endif()

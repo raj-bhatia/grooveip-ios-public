@@ -14,7 +14,6 @@ linphone_include_HEADERS=\
 	chat.h \
 	conference.h \
 	contactprovider.h \
-	content.h \
 	core.h \
 	core_utils.h \
 	defs.h \
@@ -43,6 +42,7 @@ linphone_include_HEADERS=\
 	video_definition.h \
 	wrapper_utils.h \
 	xmlrpc.h \
+	headers.h \
 	linphonecore.h \
 	linphonecore_utils.h \
 	linphonefriend.h \

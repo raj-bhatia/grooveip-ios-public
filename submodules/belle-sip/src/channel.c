@@ -1,21 +1,20 @@
 /*
 	belle-sip - SIP (RFC3261) library.
-    Copyright (C) 2010  Belledonne Communications SARL
+	Copyright (C) 2010-2018  Belledonne Communications SARL
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 2 of the License, or
+	(at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
-
 
 #include "belle_sip_internal.h"
 #include <limits.h>
@@ -32,10 +31,9 @@
 #define BELLE_SIP_CHANNEL_INVOKE_SENDING_LISTENERS(channel,msg) \
 	BELLE_SIP_INVOKE_LISTENERS_ARG1_ARG2(channel->full_listeners, belle_sip_channel_listener_t, on_sending, channel, msg)
 
-
 #define BELLE_SIP_CHANNEL_INVOKE_STATE_LISTENERS(channel,state) \
-	BELLE_SIP_INVOKE_LISTENERS_ARG1_ARG2(channel->full_listeners, belle_sip_channel_listener_t, on_state_changed, channel, state) \
-	BELLE_SIP_INVOKE_LISTENERS_ARG1_ARG2(channel->state_listeners, belle_sip_channel_listener_t, on_state_changed, channel, state) 
+	BELLE_SIP_INVOKE_LISTENERS_REVERSE_ARG1_ARG2(channel->full_listeners, belle_sip_channel_listener_t, on_state_changed, channel, state) \
+	BELLE_SIP_INVOKE_LISTENERS_REVERSE_ARG1_ARG2(channel->state_listeners, belle_sip_channel_listener_t, on_state_changed, channel, state)
 
 
 static void channel_prepare_continue(belle_sip_channel_t *obj);
@@ -126,6 +124,10 @@ static void belle_sip_channel_destroy(belle_sip_channel_t *obj){
 		belle_sip_main_loop_remove_source(obj->stack->ml,obj->inactivity_timer);
 		belle_sip_object_unref(obj->inactivity_timer);
 	}
+	if (obj->dns_ttl_timer) {
+		belle_sip_main_loop_remove_source(obj->stack->ml, obj->dns_ttl_timer);
+		belle_sip_object_unref(obj->dns_ttl_timer);
+	}
 	if (obj->public_ip) belle_sip_free(obj->public_ip);
 	if (obj->outgoing_messages) belle_sip_list_free_with_data(obj->outgoing_messages,belle_sip_object_unref);
 	if (obj->incoming_messages) belle_sip_list_free_with_data(obj->incoming_messages,belle_sip_object_unref);
@@ -149,6 +151,8 @@ BELLE_SIP_INSTANCIATE_CUSTOM_VPTR_BEGIN(belle_sip_channel_t)
 		(belle_sip_object_destroy_t)belle_sip_channel_destroy,
 		NULL, /*clone*/
 		NULL, /*marshal*/
+		NULL, /*on_first_ref*/
+		NULL, /*on_last_ref*/
 		BELLE_SIP_DEFAULT_BUFSIZE_HINT
 	},
 	NULL, /* transport */
@@ -172,8 +176,10 @@ static void fix_incoming_via(belle_sip_request_t *msg, const struct addrinfo* or
 		return;
 	}
 	bctbx_sockaddr_remove_v4_mapping(origin->ai_addr, (struct sockaddr*)&saddr, &slen);
-	err=bctbx_getnameinfo((struct sockaddr*)&saddr,slen,received,sizeof(received),
-	                rport,sizeof(rport),NI_NUMERICHOST|NI_NUMERICSERV);
+	err=bctbx_getnameinfo(
+		(struct sockaddr*)&saddr,slen,received,sizeof(received),
+		rport,sizeof(rport),NI_NUMERICHOST|NI_NUMERICSERV
+	);
 	if (err!=0){
 		belle_sip_error("fix_via: getnameinfo() failed: %s",gai_strerror(errno));
 		return;
@@ -193,10 +199,8 @@ static void fix_incoming_via(belle_sip_request_t *msg, const struct addrinfo* or
 	}
 }
 
-/*token       =  1*(alphanum / "-" / "." / "!" / "%" / "*"
-                     / "_" / "+" / "`" / "'" / "~" )
- *
- * */
+// token =  1*(alphanum / "-" / "." / "!" / "%" / "*" / "_" / "+" / "`" / "'" / "~" )
+
 static int is_token(const char* buff,size_t bufflen ) {
 	size_t i;
 	for (i=0; i<bufflen && buff[i]!='\0';i++) {
@@ -326,9 +330,10 @@ static void uncompress_body_if_required(belle_sip_message_t *msg) {
 			mbh = BELLE_SIP_MEMORY_BODY_HANDLER(bh);
 			if (belle_sip_memory_body_handler_unapply_encoding(mbh, content_encoding) == 0) {
 				belle_sip_header_content_type_t *content_type = belle_sip_message_get_header_by_type(msg, belle_sip_header_content_type_t);
+				belle_sip_header_content_length_t *content_length = belle_sip_message_get_header_by_type(msg, belle_sip_header_content_length_t);
+				belle_sip_header_content_length_set_content_length(content_length, belle_sip_body_handler_get_size(BELLE_SIP_BODY_HANDLER(mbh)));
 				belle_sip_message_remove_header_from_ptr(msg, ceh);
-				if (content_type
-					&& (strcmp(belle_sip_header_content_type_get_type(content_type), "multipart") == 0)) {
+				if (content_type && (strcmp(belle_sip_header_content_type_get_type(content_type), "multipart") == 0)) {
 					const char *unparsed_value = belle_sip_header_get_unparsed_value(BELLE_SIP_HEADER(content_type));
 					const char *boundary = strstr(unparsed_value, ";boundary=");
 					if (boundary != NULL) boundary += 10;
@@ -371,9 +376,10 @@ static int check_body(belle_sip_channel_t *obj){
 
 	obj->input_stream.content_length= content_length_header ? belle_sip_header_content_length_get_content_length(content_length_header) : 0;
 
-	if (BELLE_SIP_OBJECT_IS_INSTANCE_OF(msg,belle_sip_response_t) || BELLE_SIP_OBJECT_IS_INSTANCE_OF(msg,belle_sip_request_t)){
-		expect_body=obj->input_stream.content_length>0;
-	}else{/*http*/
+	expect_body=obj->input_stream.content_length>0;
+
+	if (BELLE_SIP_OBJECT_IS_INSTANCE_OF(msg,belle_http_response_t) || BELLE_SIP_OBJECT_IS_INSTANCE_OF(msg,belle_http_request_t)){
+		/*http chunked mode handling*/
 		if (belle_sip_message_get_header_by_type(msg, belle_sip_header_content_type_t)!=NULL){
 			belle_sip_header_t *transfer_encoding=belle_sip_message_get_header(msg,"Transfer-Encoding");
 
@@ -391,25 +397,29 @@ static int check_body(belle_sip_channel_t *obj){
 	}
 	if (expect_body){
 		belle_sip_body_handler_t *bh;
-		/*should notify the listeners*/
+		// Should notify the listeners
 		BELLE_SIP_CHANNEL_INVOKE_MESSAGE_HEADERS_LISTENERS(obj,msg);
-		/*check if the listener has setup a body handler, otherwise create a default one*/
-		if ((bh=belle_sip_message_get_body_handler(msg))==NULL){
+		// Check if the listener has setup a body handler, otherwise create a default one
+		bh = belle_sip_message_get_body_handler(msg);
+		if (!bh) {
 			belle_sip_header_t *content_encoding = belle_sip_message_get_header(msg, "Content-Encoding");
 			belle_sip_header_content_type_t *content_type = belle_sip_message_get_header_by_type(msg, belle_sip_header_content_type_t);
-			if (content_encoding != NULL) {
-				belle_sip_message_set_body_handler(msg, (bh = (belle_sip_body_handler_t *)belle_sip_memory_body_handler_new(NULL, NULL)));
-			} else if (content_type
-				&& (strcmp(belle_sip_header_content_type_get_type(content_type), "multipart") == 0)) {
+			if (content_encoding) {
+				bh = (belle_sip_body_handler_t *)belle_sip_memory_body_handler_new(NULL, NULL);
+				belle_sip_body_handler_add_header(bh, content_encoding);
+			} else if (content_type && (strcmp(belle_sip_header_content_type_get_type(content_type), "multipart") == 0)) {
 				const char *unparsed_value = belle_sip_header_get_unparsed_value(BELLE_SIP_HEADER(content_type));
 				const char *boundary = strstr(unparsed_value, ";boundary=");
-				if (boundary != NULL) boundary += 10;
+				if (boundary) boundary += 10;
 				if (boundary[0] == '\0') boundary = NULL;
-				belle_sip_message_set_body_handler(msg, (bh = (belle_sip_body_handler_t *)belle_sip_multipart_body_handler_new(belle_sip_multipart_body_handler_progress_cb, NULL, NULL, boundary)));
-				belle_sip_body_handler_set_size(bh, obj->input_stream.content_length);
+				bh = (belle_sip_body_handler_t *)belle_sip_multipart_body_handler_new(belle_sip_multipart_body_handler_progress_cb, NULL, NULL, boundary);
 			} else {
-				belle_sip_message_set_body_handler(msg,(bh=(belle_sip_body_handler_t*)belle_sip_memory_body_handler_new(NULL,NULL)));
+				bh = (belle_sip_body_handler_t *)belle_sip_memory_body_handler_new(NULL, NULL);
 			}
+			belle_sip_body_handler_set_size(bh, obj->input_stream.content_length);
+			belle_sip_body_handler_add_header(bh, BELLE_SIP_HEADER(content_length_header));
+			belle_sip_body_handler_add_header(bh, BELLE_SIP_HEADER(content_type));
+			belle_sip_message_set_body_handler(msg, bh);
 		}
 		belle_sip_body_handler_begin_recv_transfer(bh);
 	}
@@ -509,7 +519,7 @@ static int acquire_body(belle_sip_channel_t *obj, int end_of_stream){
 
 static void notify_incoming_messages(belle_sip_channel_t *obj){
 	belle_sip_list_t *elem,*l_it;
-	
+
 	belle_sip_list_t *listeners=belle_sip_list_copy_with_data(obj->full_listeners,(void *(*)(void*))belle_sip_object_ref);
 
 	for(l_it=listeners;l_it!=NULL;l_it=l_it->next){
@@ -804,17 +814,19 @@ static void channel_remove_listener(belle_sip_channel_t *obj, belle_sip_channel_
 }
 
 void belle_sip_channel_add_listener(belle_sip_channel_t *obj, belle_sip_channel_listener_t *l){
-	
+
 	if (is_state_only_listener(l)) {
-		obj->state_listeners=belle_sip_list_prepend(obj->state_listeners,
-												   belle_sip_object_weak_ref(l,
-																	   (belle_sip_object_destroy_notify_t)channel_remove_listener,obj));
+		obj->state_listeners=belle_sip_list_prepend(
+			obj->state_listeners,
+			belle_sip_object_weak_ref(l, (belle_sip_object_destroy_notify_t)channel_remove_listener,obj)
+		);
 	} else {
-		obj->full_listeners=belle_sip_list_prepend(obj->full_listeners,
-													belle_sip_object_weak_ref(l,
-																		(belle_sip_object_destroy_notify_t)channel_remove_listener,obj));
+		obj->full_listeners=belle_sip_list_prepend(
+			obj->full_listeners,
+			belle_sip_object_weak_ref(l, (belle_sip_object_destroy_notify_t)channel_remove_listener,obj)
+		);
 	}
-	
+
 }
 
 void belle_sip_channel_remove_listener(belle_sip_channel_t *obj, belle_sip_channel_listener_t *l){
@@ -1012,12 +1024,12 @@ static void belle_sip_channel_handle_error(belle_sip_channel_t *obj){
 
 int belle_sip_channel_notify_timeout(belle_sip_channel_t *obj){
 	const int too_long=60;
-	
+
 	if (obj->state != BELLE_SIP_CHANNEL_READY){
 		/*no need to notify the timeout if the channel is already in error or retry state*/
 		return FALSE;
 	}
-	
+
 	if ((int)(belle_sip_time_ms() - obj->last_recv_time) >= (too_long * 1000)){
 		belle_sip_message("A timeout related to this channel occured and no message received during last %i seconds. This channel is suspect, moving to error state",too_long);
 		channel_set_state(obj,BELLE_SIP_CHANNEL_ERROR);
@@ -1220,7 +1232,10 @@ static void compress_body_if_required(belle_sip_message_t *msg) {
 		}
 		if (BELLE_SIP_OBJECT_IS_INSTANCE_OF(bh, belle_sip_memory_body_handler_t)) {
 			mbh = BELLE_SIP_MEMORY_BODY_HANDLER(bh);
-			belle_sip_memory_body_handler_apply_encoding(mbh, content_encoding);
+			int ret = belle_sip_memory_body_handler_apply_encoding(mbh, content_encoding);
+			/* Remove Content-Encoding header if it could not be applied */
+			if (ret < 0)
+				belle_sip_message_remove_header_from_ptr(msg, ceh);
 		} else {
 			belle_sip_warning("message [%p] has Content-Encoding [%s] that cannot be applied", msg, content_encoding);
 		}
@@ -1379,8 +1394,9 @@ static void channel_process_queue(belle_sip_channel_t *obj){
 	belle_sip_message_t *msg;
 	belle_sip_object_ref(obj);/* we need to ref ourself because code below may trigger our destruction*/
 
-	if (obj->out_state!=OUTPUT_STREAM_IDLE)
+	if (obj->out_state!=OUTPUT_STREAM_IDLE) {
 		_send_message(obj);
+	}
 
 	while((msg=channel_pop_outgoing(obj))!=NULL && obj->state==BELLE_SIP_CHANNEL_READY && obj->out_state==OUTPUT_STREAM_IDLE) {
 		send_message(obj, msg);
@@ -1417,16 +1433,70 @@ void belle_sip_channel_set_ready(belle_sip_channel_t *obj, const struct sockaddr
 	channel_process_queue(obj);
 }
 
-static void channel_res_done(void *data, const char *name, struct addrinfo *ai_list){
+static int channel_dns_ttl_timeout(void *data, unsigned int event) {
+	belle_sip_channel_t *obj = (belle_sip_channel_t *)data;
+	belle_sip_message("Channel [%p]: DNS TTL timeout reached.", obj);
+	obj->dns_ttl_timedout = TRUE;
+	return BELLE_SIP_STOP;
+}
+
+static bool_t addrinfo_in_list(const struct addrinfo *ai, const struct addrinfo *list) {
+	const struct addrinfo *item = list;
+	bool_t in_list = FALSE;
+	while (item != NULL) {
+		if ((ai->ai_family == item->ai_family) && (bctbx_sockaddr_equals(ai->ai_addr, item->ai_addr))) {
+			in_list = TRUE;
+			break;
+		}
+		item = item->ai_next;
+	}
+	return in_list;
+}
+
+static bool_t addrinfo_is_first(const struct addrinfo *ai, const struct addrinfo *list) {
+	if (list != NULL && (ai->ai_family == list->ai_family) && (bctbx_sockaddr_equals(ai->ai_addr, list->ai_addr)))
+		return TRUE;
+	return FALSE;
+}
+
+static void channel_res_done(void *data, const char *name, struct addrinfo *ai_list, uint32_t ttl){
 	belle_sip_channel_t *obj=(belle_sip_channel_t*)data;
 	if (obj->resolver_ctx){
 		belle_sip_object_unref(obj->resolver_ctx);
 		obj->resolver_ctx=NULL;
 	}
 	if (ai_list){
-		obj->peer_list=obj->current_peer=ai_list;
-		channel_set_state(obj,BELLE_SIP_CHANNEL_RES_DONE);
+		if (!obj->current_peer) {
+			obj->peer_list=obj->current_peer=ai_list;
+			channel_set_state(obj,BELLE_SIP_CHANNEL_RES_DONE);
+		} else {
+			bool_t check;
+			if (belle_sip_stack_reconnect_to_primary_asap_enabled(obj->stack)) {
+				check = addrinfo_is_first(obj->current_peer, ai_list);
+			} else {
+				check = addrinfo_in_list(obj->current_peer, ai_list);
+			}
+
+			if (check) {
+				belle_sip_message("channel[%p]: DNS resolution returned the currently used address, continue using it", obj);
+				obj->peer_list = ai_list;
+				channel_set_state(obj, BELLE_SIP_CHANNEL_READY);
+			} else {
+				belle_sip_message("channel[%p]: DNS resolution returned an address different than the one being used, reconnect to the new address", obj);
+				obj->peer_list = obj->current_peer = ai_list;
+				belle_sip_channel_close(obj);
+				belle_sip_main_loop_do_later(obj->stack->ml, (belle_sip_callback_t)channel_connect_next, belle_sip_object_ref(obj));
+				channel_set_state(obj, BELLE_SIP_CHANNEL_RETRY);
+			}
+		}
 		channel_prepare_continue(obj);
+		if (!obj->dns_ttl_timer ) {
+			obj->dns_ttl_timer = belle_sip_main_loop_create_timeout(obj->stack->ml, channel_dns_ttl_timeout, obj, ttl * 1000, "Channel DNS TTL timer");
+		} else {
+			/* Restart the timer for new period. */
+			belle_sip_source_set_timeout(obj->dns_ttl_timer, ttl * 1000);
+			belle_sip_main_loop_add_source(obj->stack->ml, obj->dns_ttl_timer);
+		}
 	}else{
 		belle_sip_error("%s: DNS resolution failed for %s", __FUNCTION__, name);
 		channel_set_state(obj,BELLE_SIP_CHANNEL_ERROR);
@@ -1498,7 +1568,19 @@ static void queue_message_delayed(belle_sip_channel_t *obj, belle_sip_message_t 
 	delay_send_t *ctx=belle_sip_malloc(sizeof(delay_send_t));
 	ctx->chan=(belle_sip_channel_t*)belle_sip_object_ref(obj);
 	ctx->msg=(belle_sip_message_t*)belle_sip_object_ref(msg);
+
+	/* FIXME: Temporary workaround for -Wcast-function-type. */
+	#if __GNUC__ >= 8
+		_Pragma("GCC diagnostic push")
+		_Pragma("GCC diagnostic ignored \"-Wcast-function-type\"")
+	#endif // if __GNUC__ >= 8
+
 	belle_sip_main_loop_add_timeout(obj->stack->ml,(belle_sip_source_func_t)on_delayed_send_do,ctx,obj->stack->tx_delay);
+
+	#if __GNUC__ >= 8
+		_Pragma("GCC diagnostic pop")
+	#endif // if __GNUC__ >= 8
+
 	belle_sip_message("channel %p: message sending delayed by %i ms",obj,obj->stack->tx_delay);
 }
 
@@ -1537,14 +1619,21 @@ belle_sip_channel_t *belle_sip_channel_find_from_list(belle_sip_list_t *l, int a
 	return chan;
 }
 
+void belle_sip_channel_check_dns_reusability(belle_sip_channel_t *obj) {
+	if (obj->dns_ttl_timedout) {
+		obj->dns_ttl_timedout = FALSE;
+		belle_sip_channel_resolve(obj);
+	}
+}
+
 #ifdef __ANDROID__
 
 unsigned long belle_sip_begin_background_task(const char *name, belle_sip_background_task_end_callback_t cb, void *data){
-    return wake_lock_acquire(name);
+	return wake_lock_acquire(name);
 }
 
 void belle_sip_end_background_task(unsigned long id){
-    wake_lock_release(id);
+	wake_lock_release(id);
 }
 
 #elif !TARGET_OS_IPHONE && !defined(__APPLE__)
@@ -1559,4 +1648,3 @@ void belle_sip_end_background_task(unsigned long id){
 }
 
 #endif
-

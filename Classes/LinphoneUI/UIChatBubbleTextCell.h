@@ -25,11 +25,11 @@
 
 @interface UIChatBubbleTextCell : UITableViewCell
 
+@property(readonly, nonatomic) LinphoneEventLog *event;
 @property(readonly, nonatomic) LinphoneChatMessage *message;
 @property(nonatomic, weak) IBOutlet UIImageView *backgroundColorImage;
 @property(nonatomic, weak) IBOutlet UIRoundedImageView *avatarImage;
 @property(nonatomic, weak) IBOutlet UILabel *contactDateLabel;
-@property(nonatomic, weak) IBOutlet UIImageView *statusErrorImage;
 @property(weak, nonatomic) IBOutlet UIActivityIndicatorView *statusInProgressSpinner;
 @property(nonatomic, weak) IBOutlet UITextViewNoDefine *messageText;
 @property(weak, nonatomic) IBOutlet UIImageView *bottomBarColor;
@@ -42,10 +42,12 @@
 
 + (CGSize)ViewSizeForMessage:(LinphoneChatMessage *)chat withWidth:(int)width;
 
+- (void)setEvent:(LinphoneEventLog *)event;
 - (void)setChatMessage:(LinphoneChatMessage *)message;
 
-- (IBAction)onDeleteClick:(id)event;
-- (IBAction)onResendClick:(id)event;
+- (void)onDelete;
+- (void)onResend;
+- (void)onLime;
 - (void)update;
 
 - (void)displayImdmStatus:(LinphoneChatMessageState)state;

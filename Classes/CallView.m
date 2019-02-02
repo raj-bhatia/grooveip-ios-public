@@ -135,7 +135,7 @@ static UICompositeViewDescription *compositeDescription = nil;
 
 - (void)viewWillAppear:(BOOL)animated {
 	[super viewWillAppear:animated];
-
+	_waitView.hidden = TRUE;
 	LinphoneManager.instance.nextCallIsTransfer = NO;
 
 	[self updateUnreadMessage:FALSE];
@@ -154,7 +154,6 @@ static UICompositeViewDescription *compositeDescription = nil;
 	[self previewTouchLift];
 	// Enable tap
 	[singleFingerTap setEnabled:TRUE];
-	[[UIDevice currentDevice] setProximityMonitoringEnabled:!_speakerButton.enabled];
 
 	[NSNotificationCenter.defaultCenter addObserver:self
 										   selector:@selector(messageReceived:)
@@ -180,8 +179,8 @@ static UICompositeViewDescription *compositeDescription = nil;
 	[super viewDidAppear:animated];
 
 	[[UIApplication sharedApplication] setIdleTimerDisabled:YES];
-	UIDevice.currentDevice.proximityMonitoringEnabled = YES;
-
+	[[UIDevice currentDevice] setProximityMonitoringEnabled:TRUE];
+	
 	[PhoneMainView.instance setVolumeHidden:TRUE];
 	hiddenVolume = TRUE;
 
@@ -193,7 +192,7 @@ static UICompositeViewDescription *compositeDescription = nil;
 
 - (void)viewWillDisappear:(BOOL)animated {
 	[super viewWillDisappear:animated];
-
+[[UIDevice currentDevice] setProximityMonitoringEnabled:FALSE];
 	[self disableVideoDisplay:TRUE animated:NO];
 
 	if (hideControlsTimer != nil) {
@@ -212,7 +211,6 @@ static UICompositeViewDescription *compositeDescription = nil;
 		videoDismissTimer = nil;
 	}
 
-	[[UIDevice currentDevice] setProximityMonitoringEnabled:FALSE];
 	// Remove observer
 	[NSNotificationCenter.defaultCenter removeObserver:self];
 }
@@ -221,7 +219,7 @@ static UICompositeViewDescription *compositeDescription = nil;
 	[super viewDidDisappear:animated];
 
 	[[UIApplication sharedApplication] setIdleTimerDisabled:false];
-	UIDevice.currentDevice.proximityMonitoringEnabled = NO;
+	[[UIDevice currentDevice] setProximityMonitoringEnabled:FALSE];
 
 	[PhoneMainView.instance fullScreen:false];
 	// Disable tap
@@ -359,7 +357,9 @@ static void hideSpinner(LinphoneCall *call, void *user_data) {
 		hideControlsTimer = nil;
 	}
 
-	[PhoneMainView.instance fullScreen:!disabled];
+	if(![PhoneMainView.instance isIphoneXDevice]){
+		[PhoneMainView.instance fullScreen:!disabled];
+	}
 	[PhoneMainView.instance hideTabBar:!disabled];
 
 	if (!disabled) {
@@ -543,11 +543,12 @@ static void hideSpinner(LinphoneCall *call, void *user_data) {
 		case LinphoneCallOutgoingInit:
 		case LinphoneCallConnected:
 		case LinphoneCallStreamsRunning: {
+#if 0	// Changed Linphone code - GrooVe IP does not support video, and saw a crash here, so removing this section of code
 			// check video
 			if (!linphone_call_params_video_enabled(linphone_call_get_current_params(call))) {
 				const LinphoneCallParams *param = linphone_call_get_current_params(call);
 				const LinphoneCallAppData *callAppData =
-					(__bridge const LinphoneCallAppData *)(linphone_call_get_user_pointer(call));
+					(__bridge const LinphoneCallAppData *)(linphone_call_get_user_data(call));
 				if (state == LinphoneCallStreamsRunning && callAppData->videoRequested &&
 					linphone_call_params_low_bandwidth_enabled(param)) {
 					// too bad video was not enabled because low bandwidth
@@ -566,6 +567,7 @@ static void hideSpinner(LinphoneCall *call, void *user_data) {
 					callAppData->videoRequested = FALSE; /*reset field*/
 				}
 			}
+#endif
 			break;
 		}
 		case LinphoneCallUpdatedByRemote: {
@@ -718,7 +720,12 @@ static void hideSpinner(LinphoneCall *call, void *user_data) {
 }
 
 - (IBAction)onChatClick:(id)sender {
-	[PhoneMainView.instance changeCurrentView:ChatsListView.compositeViewDescription];
+#if 1	// Changed Linphone code - Keep track of SMS (Chat) tab
+	TabBarView.inSmsTab = TRUE;
+#endif
+	const LinphoneCall *currentCall = linphone_core_get_current_call(LC);
+	const LinphoneAddress *addr = currentCall ? linphone_call_get_remote_address(currentCall) : NULL;
+	[PhoneMainView.instance getOrCreateOneToOneChatRoom:addr waitView:_waitView];
 }
 
 - (IBAction)onRoutesBluetoothClick:(id)sender {

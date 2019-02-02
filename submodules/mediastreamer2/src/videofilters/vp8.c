@@ -23,6 +23,8 @@
 #include "mediastreamer2/msticker.h"
 #include "mediastreamer2/msvideo.h"
 #include "mediastreamer2/mscodecutils.h"
+#include "mediastreamer2/msasync.h"
+#include "mediastreamer2/msqueue.h"
 #include "vp8rtpfmt.h"
 
 #define PICTURE_ID_ON_16_BITS
@@ -44,18 +46,21 @@ static const MSVideoConfiguration vp8_conf_list[] = {
 	MS_VP8_CONF(1024000, 1536000, SXGA_MINUS, 12, 2),
 	MS_VP8_CONF( 750000, 1024000,        XGA, 12, 2),
 	MS_VP8_CONF( 500000,  750000,       SVGA, 12, 2),
-	MS_VP8_CONF( 300000,  500000,        VGA, 12, 2),
+	MS_VP8_CONF( 800000, 3000000,        VGA, 30, 8),
+	MS_VP8_CONF( 800000, 3000000,        VGA, 25, 4),
+	MS_VP8_CONF( 400000,  800000,        VGA, 12, 2),
 	MS_VP8_CONF( 100000,  300000,       QVGA, 18, 2),
 	MS_VP8_CONF(  64000,  100000,       QCIF, 12, 2),
-	MS_VP8_CONF(300000, 600000,          VGA, 12, 1),
-	MS_VP8_CONF(100000, 300000,         QVGA, 10, 1),
-	MS_VP8_CONF( 64000, 100000,         QCIF, 10, 1),
+	MS_VP8_CONF( 400000,  800000,        VGA, 12, 1),
+	MS_VP8_CONF( 100000,  300000,       QVGA, 10, 1),
+	MS_VP8_CONF(  64000,  100000,       QCIF, 10, 1),
 	MS_VP8_CONF(      0,   64000,       QCIF,  5, 1)
 #else
 	MS_VP8_CONF(1536000,  2560000, SXGA_MINUS, 25, 4),
-	MS_VP8_CONF(800000,  2000000,       720P, 25, 4),
-	MS_VP8_CONF(800000,  1536000,        XGA, 25, 4),
+	MS_VP8_CONF( 800000,  2000000,       720P, 25, 4),
+	MS_VP8_CONF( 800000,  1536000,        XGA, 25, 4),
 	MS_VP8_CONF( 600000,  1024000,       SVGA, 25, 2),
+	MS_VP8_CONF( 600000,  3000000,        VGA, 30, 2),
 	MS_VP8_CONF( 350000,   600000,        VGA, 25, 2),
 	MS_VP8_CONF( 350000,   600000,        VGA, 15, 1),
 	MS_VP8_CONF( 200000,   350000,        CIF, 18, 1),
@@ -95,10 +100,14 @@ typedef struct EncState {
 	int last_fir_seq_nr;
 	uint16_t picture_id;
 	uint16_t last_sli_id;
+	vpx_codec_pts_t last_sli_frame_count; /*The current frame count when last received SLI was processed. Used to detect 16 bits rollover*/
 	bool_t force_keyframe;
 	bool_t invalid_frame_reported;
 	bool_t avpf_enabled;
 	bool_t ready;
+	MSWorkerThread *process_thread;
+	queue_t entry_q;
+	MSQueue *exit_q;
 } EncState;
 
 #define MIN_KEY_FRAME_DIST 4 /*since one i-frame is allowed to be 4 times bigger of the target bitrate*/
@@ -185,6 +194,12 @@ static void enc_preprocess(MSFilter *f) {
 #if defined(__ANDROID__) || (TARGET_OS_IPHONE == 1) || defined(__arm__) || defined(_M_ARM)
 	cpuused = 10 - s->cfg.g_threads; /*cpu/quality tradeoff: positive values decrease CPU usage at the expense of quality*/
 	if (cpuused < 7) cpuused = 7; /*values beneath 7 consume too much CPU*/
+	if (ms_video_size_area_greater_than(MS_VIDEO_SIZE_VGA, s->vconf.vsize)){
+		if (s->cfg.g_threads <= 2) cpuused = 8;
+		else if (s->cfg.g_threads <= 4) cpuused = 5;
+		else cpuused = 1;
+		
+	}
 	if( s->cfg.g_threads == 1 ){
 		/* on mono-core iOS devices, we reduce the quality a bit more due to VP8 being slower with new Clang compilers */
 		cpuused = 16;
@@ -217,6 +232,11 @@ static void enc_preprocess(MSFilter *f) {
 	} else if (s->frame_count == 0) {
 		ms_video_starter_init(&s->starter);
 	}
+	
+	s->process_thread = ms_worker_thread_new();
+	qinit(&s->entry_q);
+	s->exit_q = ms_queue_new(0, 0, 0, 0);
+	
 	s->ready = TRUE;
 }
 
@@ -424,8 +444,9 @@ static bool_t is_frame_independent(unsigned int flags){
 	return FALSE;
 }
 
-static void enc_process(MSFilter *f) {
+static void enc_process_frame_task(void *obj) {
 	mblk_t *im;
+	MSFilter *f = (MSFilter*)obj;
 	uint64_t timems = f->ticker->time;
 	uint32_t timestamp = (uint32_t)(timems*90);
 	EncState *s = (EncState *)f->data;
@@ -433,6 +454,160 @@ static void enc_process(MSFilter *f) {
 	vpx_codec_err_t err;
 	MSPicture yuv;
 	bool_t is_ref_frame=FALSE;
+	vpx_image_t img;
+	
+#if defined(__ANDROID__) || (TARGET_OS_IPHONE == 1) || defined(__arm__) || defined(_M_ARM)
+	
+	ms_filter_lock(f);
+	if ((im = getq(&s->entry_q)) == NULL) {
+		ms_warning("VP8 async process: No frame in entry queue");
+		ms_filter_unlock(f);
+		return;
+	}
+#else
+	if ((im = getq(&s->entry_q)) == NULL) {
+		ms_warning("VP8 process: No frame in entry queue");
+		return;
+	}
+#endif
+	
+#if defined(__ANDROID__) || (TARGET_OS_IPHONE == 1) || defined(__arm__) || defined(_M_ARM)
+	if (s->entry_q.q_mcount >= 3){
+		/*don't let too much buffers to be queued here, it makes no sense for a real time processing and would consume too much memory*/
+		ms_warning("VP8 async process: dropping %i frames", s->entry_q.q_mcount);
+		flushq(&s->entry_q, 0);
+	}
+	ms_filter_unlock(f);
+#endif
+
+	flags = 0;
+	ms_yuv_buf_init_from_mblk(&yuv, im);
+	freemsg(im);
+	vpx_img_wrap(&img, VPX_IMG_FMT_I420, s->vconf.vsize.width, s->vconf.vsize.height, 1, yuv.planes[0]);
+
+	if ((s->avpf_enabled != TRUE) && ms_video_starter_need_i_frame(&s->starter, f->ticker->time)) {
+		s->force_keyframe = TRUE;
+	}
+	if (s->force_keyframe == TRUE) {
+		ms_message("Forcing vp8 key frame for filter [%p]", f);
+		flags = VPX_EFLAG_FORCE_KF;
+	} else if (s->avpf_enabled == TRUE) {
+		if (s->frame_count == 0) s->force_keyframe = TRUE;
+		enc_fill_encoder_flags(s, &flags);
+	}
+
+#ifdef AVPF_DEBUG
+	ms_message("VP8 encoder frames state:");
+	ms_message("\tgolden: count=%" PRIi64 ", picture_id=0x%04x, ack=%s",
+		s->frames_state.golden.count, s->frames_state.golden.picture_id, (s->frames_state.golden.acknowledged == TRUE) ? "Y" : "N");
+	ms_message("\taltref: count=%" PRIi64 ", picture_id=0x%04x, ack=%s",
+		s->frames_state.altref.count, s->frames_state.altref.picture_id, (s->frames_state.altref.acknowledged == TRUE) ? "Y" : "N");
+#endif
+	err = vpx_codec_encode(&s->codec, &img, s->frame_count, 1, flags, 1000000LL/(2*(int)s->vconf.fps)); /*encoder has half a framerate interval to encode*/
+	if (err) {
+		ms_error("vpx_codec_encode failed : %d %s (%s)\n", err, vpx_codec_err_to_string(err), vpx_codec_error_detail(&s->codec));
+	} else {
+		vpx_codec_iter_t iter = NULL;
+		const vpx_codec_cx_pkt_t *pkt;
+		bctbx_list_t *list = NULL;
+
+		/* Update the frames state. */
+		is_ref_frame=FALSE;
+		if (flags & VPX_EFLAG_FORCE_KF) {
+			enc_mark_reference_frame_as_sent(s, VP8_GOLD_FRAME);
+			enc_mark_reference_frame_as_sent(s, VP8_ALTR_FRAME);
+			s->frames_state.golden.is_independant=TRUE;
+			s->frames_state.altref.is_independant=TRUE;
+			s->frames_state.last_independent_frame=s->frame_count;
+			s->force_keyframe = FALSE;
+			is_ref_frame=TRUE;
+		}else if (flags & VP8_EFLAG_FORCE_GF) {
+			enc_mark_reference_frame_as_sent(s, VP8_GOLD_FRAME);
+			is_ref_frame=TRUE;
+		}else if (flags & VP8_EFLAG_FORCE_ARF) {
+			enc_mark_reference_frame_as_sent(s, VP8_ALTR_FRAME);
+			is_ref_frame=TRUE;
+		}else if (flags & VP8_EFLAG_NO_REF_LAST) {
+			enc_mark_reference_frame_as_sent(s, VP8_LAST_FRAME);
+			is_ref_frame=is_reconstruction_frame_sane(s,flags);
+		}
+		if (is_frame_independent(flags)){
+			s->frames_state.last_independent_frame=s->frame_count;
+		}
+
+		/* Pack the encoded frame. */
+		while( (pkt = vpx_codec_get_cx_data(&s->codec, &iter)) ) {
+			if ((pkt->kind == VPX_CODEC_CX_FRAME_PKT) && (pkt->data.frame.sz > 0)) {
+				Vp8RtpFmtPacket *packet = ms_new0(Vp8RtpFmtPacket, 1);
+
+				packet->m = allocb(pkt->data.frame.sz, 0);
+				memcpy(packet->m->b_wptr, pkt->data.frame.buf, pkt->data.frame.sz);
+				packet->m->b_wptr += pkt->data.frame.sz;
+				mblk_set_timestamp_info(packet->m, timestamp);
+				packet->pd = ms_new0(Vp8RtpFmtPayloadDescriptor, 1);
+				packet->pd->start_of_partition = TRUE;
+				packet->pd->non_reference_frame = s->avpf_enabled && !is_ref_frame;
+				if (s->avpf_enabled == TRUE) {
+					packet->pd->extended_control_bits_present = TRUE;
+					packet->pd->pictureid_present = TRUE;
+					packet->pd->pictureid = s->picture_id;
+				} else {
+					packet->pd->extended_control_bits_present = FALSE;
+					packet->pd->pictureid_present = FALSE;
+				}
+				if (s->flags & VPX_CODEC_USE_OUTPUT_PARTITION) {
+					packet->pd->pid = (uint8_t)pkt->data.frame.partition_id;
+					if (!(pkt->data.frame.flags & VPX_FRAME_IS_FRAGMENT)) {
+						mblk_set_marker_info(packet->m, TRUE);
+					}
+				} else {
+					packet->pd->pid = 0;
+					mblk_set_marker_info(packet->m, TRUE);
+				}
+				list = bctbx_list_append(list, packet);
+			}
+		}
+
+#ifdef AVPF_DEBUG
+		ms_message("VP8 encoder picture_id=%i ***| %s | %s | %s | %s", (int)s->picture_id,
+			(flags & VPX_EFLAG_FORCE_KF) ? "KF " : (flags & VP8_EFLAG_FORCE_GF) ? "GF " :  (flags & VP8_EFLAG_FORCE_ARF) ? "ARF" : "   ",
+			(flags & VP8_EFLAG_NO_REF_GF) ? "NOREFGF" : "       ",
+			(flags & VP8_EFLAG_NO_REF_ARF) ? "NOREFARF" : "        ",
+			(flags & VP8_EFLAG_NO_REF_LAST) ? "NOREFLAST" : "         ");
+#endif
+		
+#if defined(__ANDROID__) || (TARGET_OS_IPHONE == 1) || defined(__arm__) || defined(_M_ARM)
+		ms_filter_lock(f);
+		vp8rtpfmt_packer_process(&s->packer, list, s->exit_q, f->factory);
+		ms_filter_unlock(f);
+#else
+		vp8rtpfmt_packer_process(&s->packer, list, f->outputs[0], f->factory);
+#endif
+
+		/* Handle video starter if AVPF is not enabled. */
+		s->frame_count++;
+		if ((s->avpf_enabled != TRUE) && (s->frame_count == 1)) {
+			ms_video_starter_first_frame(&s->starter, f->ticker->time);
+		}
+
+		/* Increment the pictureID. */
+		s->picture_id++;
+#ifdef PICTURE_ID_ON_16_BITS
+		if (s->picture_id == 0)
+			s->picture_id = 0x8000;
+#else
+		if (s->picture_id == 0x0080)
+			s->picture_id = 0;
+#endif
+	}
+}
+
+static void enc_process(MSFilter *f) {
+	EncState *s = (EncState *)f->data;
+	mblk_t *entry_f;
+#if defined(__ANDROID__) || (TARGET_OS_IPHONE == 1) || defined(__arm__) || defined(_M_ARM)
+	mblk_t *exit_f;
+#endif
 
 	ms_filter_lock(f);
 
@@ -446,131 +621,36 @@ static void enc_process(MSFilter *f) {
 		return;
 	}
 
-	if ((im = ms_queue_peek_last(f->inputs[0])) != NULL) {
-		vpx_image_t img;
-
-		flags = 0;
-		ms_yuv_buf_init_from_mblk(&yuv, im);
-		vpx_img_wrap(&img, VPX_IMG_FMT_I420, s->vconf.vsize.width, s->vconf.vsize.height, 1, yuv.planes[0]);
-
-		if ((s->avpf_enabled != TRUE) && ms_video_starter_need_i_frame(&s->starter, f->ticker->time)) {
-			s->force_keyframe = TRUE;
-		}
-		if (s->force_keyframe == TRUE) {
-			ms_message("Forcing vp8 key frame for filter [%p]", f);
-			flags = VPX_EFLAG_FORCE_KF;
-		} else if (s->avpf_enabled == TRUE) {
-			if (s->frame_count == 0) s->force_keyframe = TRUE;
-			enc_fill_encoder_flags(s, &flags);
-		}
-
-#ifdef AVPF_DEBUG
-		ms_message("VP8 encoder frames state:");
-		ms_message("\tgolden: count=%" PRIi64 ", picture_id=0x%04x, ack=%s",
-			s->frames_state.golden.count, s->frames_state.golden.picture_id, (s->frames_state.golden.acknowledged == TRUE) ? "Y" : "N");
-		ms_message("\taltref: count=%" PRIi64 ", picture_id=0x%04x, ack=%s",
-			s->frames_state.altref.count, s->frames_state.altref.picture_id, (s->frames_state.altref.acknowledged == TRUE) ? "Y" : "N");
-#endif
-		err = vpx_codec_encode(&s->codec, &img, s->frame_count, 1, flags, 1000000LL/(2*(int)s->vconf.fps)); /*encoder has half a framerate interval to encode*/
-		if (err) {
-			ms_error("vpx_codec_encode failed : %d %s (%s)\n", err, vpx_codec_err_to_string(err), vpx_codec_error_detail(&s->codec));
-		} else {
-			vpx_codec_iter_t iter = NULL;
-			const vpx_codec_cx_pkt_t *pkt;
-			bctbx_list_t *list = NULL;
-
-			/* Update the frames state. */
-			is_ref_frame=FALSE;
-			if (flags & VPX_EFLAG_FORCE_KF) {
-				enc_mark_reference_frame_as_sent(s, VP8_GOLD_FRAME);
-				enc_mark_reference_frame_as_sent(s, VP8_ALTR_FRAME);
-				s->frames_state.golden.is_independant=TRUE;
-				s->frames_state.altref.is_independant=TRUE;
-				s->frames_state.last_independent_frame=s->frame_count;
-				s->force_keyframe = FALSE;
-				is_ref_frame=TRUE;
-			}else if (flags & VP8_EFLAG_FORCE_GF) {
-				enc_mark_reference_frame_as_sent(s, VP8_GOLD_FRAME);
-				is_ref_frame=TRUE;
-			}else if (flags & VP8_EFLAG_FORCE_ARF) {
-				enc_mark_reference_frame_as_sent(s, VP8_ALTR_FRAME);
-				is_ref_frame=TRUE;
-			}else if (flags & VP8_EFLAG_NO_REF_LAST) {
-				enc_mark_reference_frame_as_sent(s, VP8_LAST_FRAME);
-				is_ref_frame=is_reconstruction_frame_sane(s,flags);
-			}
-			if (is_frame_independent(flags)){
-				s->frames_state.last_independent_frame=s->frame_count;
-			}
-
-			/* Pack the encoded frame. */
-			while( (pkt = vpx_codec_get_cx_data(&s->codec, &iter)) ) {
-				if ((pkt->kind == VPX_CODEC_CX_FRAME_PKT) && (pkt->data.frame.sz > 0)) {
-					Vp8RtpFmtPacket *packet = ms_new0(Vp8RtpFmtPacket, 1);
-
-					packet->m = allocb(pkt->data.frame.sz, 0);
-					memcpy(packet->m->b_wptr, pkt->data.frame.buf, pkt->data.frame.sz);
-					packet->m->b_wptr += pkt->data.frame.sz;
-					mblk_set_timestamp_info(packet->m, timestamp);
-					packet->pd = ms_new0(Vp8RtpFmtPayloadDescriptor, 1);
-					packet->pd->start_of_partition = TRUE;
-					packet->pd->non_reference_frame = s->avpf_enabled && !is_ref_frame;
-					if (s->avpf_enabled == TRUE) {
-						packet->pd->extended_control_bits_present = TRUE;
-						packet->pd->pictureid_present = TRUE;
-						packet->pd->pictureid = s->picture_id;
-					} else {
-						packet->pd->extended_control_bits_present = FALSE;
-						packet->pd->pictureid_present = FALSE;
-					}
-					if (s->flags & VPX_CODEC_USE_OUTPUT_PARTITION) {
-						packet->pd->pid = (uint8_t)pkt->data.frame.partition_id;
-						if (!(pkt->data.frame.flags & VPX_FRAME_IS_FRAGMENT)) {
-							mblk_set_marker_info(packet->m, TRUE);
-						}
-					} else {
-						packet->pd->pid = 0;
-						mblk_set_marker_info(packet->m, TRUE);
-					}
-					list = bctbx_list_append(list, packet);
-				}
-			}
-
-#ifdef AVPF_DEBUG
-			ms_message("VP8 encoder picture_id=%i ***| %s | %s | %s | %s", (int)s->picture_id,
-				(flags & VPX_EFLAG_FORCE_KF) ? "KF " : (flags & VP8_EFLAG_FORCE_GF) ? "GF " :  (flags & VP8_EFLAG_FORCE_ARF) ? "ARF" : "   ",
-				(flags & VP8_EFLAG_NO_REF_GF) ? "NOREFGF" : "       ",
-				(flags & VP8_EFLAG_NO_REF_ARF) ? "NOREFARF" : "        ",
-				(flags & VP8_EFLAG_NO_REF_LAST) ? "NOREFLAST" : "         ");
-#endif
-
-			vp8rtpfmt_packer_process(&s->packer, list, f->outputs[0], f->factory);
-
-			/* Handle video starter if AVPF is not enabled. */
-			s->frame_count++;
-			if ((s->avpf_enabled != TRUE) && (s->frame_count == 1)) {
-				ms_video_starter_first_frame(&s->starter, f->ticker->time);
-			}
-
-			/* Increment the pictureID. */
-			s->picture_id++;
-#ifdef PICTURE_ID_ON_16_BITS
-			if (s->picture_id == 0)
-				s->picture_id = 0x8000;
+	/* If we have a frame then we put it in the entry queue and we call the task enc_process_frame_task in async */
+	if ((entry_f = ms_queue_peek_last(f->inputs[0])) != NULL) {
+		ms_queue_remove(f->inputs[0], entry_f);
+		putq(&s->entry_q, entry_f);
+#if defined(__ANDROID__) || (TARGET_OS_IPHONE == 1) || defined(__arm__) || defined(_M_ARM)
+		ms_worker_thread_add_task(s->process_thread, enc_process_frame_task, (void*)f);
 #else
-			if (s->picture_id == 0x0080)
-				s->picture_id = 0;
+		enc_process_frame_task((void*)f);
 #endif
-		}
 	}
+		
+#if defined(__ANDROID__) || (TARGET_OS_IPHONE == 1) || defined(__arm__) || defined(_M_ARM)
+	/* Put each frame we have in exit_q in f->output[0] */
+	while ((exit_f = ms_queue_get(s->exit_q)) != NULL) {
+		ms_queue_put(f->outputs[0], exit_f);
+	}
+#endif
+
 	ms_filter_unlock(f);
 	ms_queue_flush(f->inputs[0]);
 }
 
 static void enc_postprocess(MSFilter *f) {
 	EncState *s = (EncState *)f->data;
+	ms_worker_thread_destroy(s->process_thread, FALSE);
 	if (s->ready) vpx_codec_destroy(&s->codec);
 	vp8rtpfmt_packer_uninit(&s->packer);
+	flushq(&s->entry_q,0);
+	ms_queue_destroy(s->exit_q);
+	s->exit_q = NULL;
 	s->ready = FALSE;
 }
 
@@ -579,15 +659,13 @@ static int enc_set_configuration(MSFilter *f, void *data) {
 	const MSVideoConfiguration *vconf = (const MSVideoConfiguration *)data;
 	if (vconf != &s->vconf) memcpy(&s->vconf, vconf, sizeof(MSVideoConfiguration));
 
-	if (s->vconf.required_bitrate > s->vconf.bitrate_limit)
-		s->vconf.required_bitrate = s->vconf.bitrate_limit;
 	s->cfg.rc_target_bitrate = (unsigned int)(((float)s->vconf.required_bitrate) * 0.92f / 1024.0f); //0.92=take into account IP/UDP/RTP overhead, in average.
+	s->cfg.g_timebase.num = 1;
+	s->cfg.g_timebase.den = (int)s->vconf.fps;
 	if (s->ready) {
 		ms_filter_lock(f);
-		enc_postprocess(f);
-		enc_preprocess(f);
+		vpx_codec_enc_config_set(&s->codec, &s->cfg);
 		ms_filter_unlock(f);
-		return 0;
 	}
 
 	ms_message("Video configuration set: bitrate=%dbits/s, fps=%f, vsize=%dx%d for encoder [%p]"	, s->vconf.required_bitrate,
@@ -599,10 +677,11 @@ static int enc_set_vsize(MSFilter *f, void *data) {
 	MSVideoConfiguration best_vconf;
 	MSVideoSize *vs = (MSVideoSize *)data;
 	EncState *s = (EncState *)f->data;
-	best_vconf = ms_video_find_best_configuration_for_size(s->vconf_list, *vs, ms_factory_get_cpu_count(f->factory));
+	best_vconf = ms_video_find_best_configuration_for_size_and_bitrate(s->vconf_list, *vs, ms_factory_get_cpu_count(f->factory), s->vconf.required_bitrate);
 	s->vconf.vsize = *vs;
 	s->vconf.fps = best_vconf.fps;
 	s->vconf.bitrate_limit = best_vconf.bitrate_limit;
+	s->vconf.required_bitrate = best_vconf.bitrate_limit < s->vconf.required_bitrate ? best_vconf.bitrate_limit : s->vconf.required_bitrate;
 	enc_set_configuration(f, &s->vconf);
 	return 0;
 }
@@ -643,7 +722,7 @@ static int enc_set_br(MSFilter *f, void *data) {
 		s->vconf.required_bitrate = br;
 		enc_set_configuration(f, &s->vconf);
 	} else {
-		MSVideoConfiguration best_vconf = ms_video_find_best_configuration_for_bitrate(s->vconf_list, br, ms_factory_get_cpu_count(f->factory));
+		MSVideoConfiguration best_vconf = ms_video_find_best_configuration_for_size_and_bitrate(s->vconf_list, s->vconf.vsize, ms_factory_get_cpu_count(f->factory), br);
 		enc_set_configuration(f, &best_vconf);
 	}
 	return 0;
@@ -683,9 +762,11 @@ static int enc_notify_pli(MSFilter *f, void *data) {
 static int enc_notify_fir(MSFilter *f, void *data) {
 	EncState *s = (EncState *)f->data;
 	uint8_t seq_nr = *((uint8_t *)data);
-	if (seq_nr != s->last_fir_seq_nr) {
-		s->force_keyframe = TRUE;
-		s->last_fir_seq_nr = seq_nr;
+	if (should_generate_key_frame(s,MIN_KEY_FRAME_DIST)){
+		if (seq_nr != s->last_fir_seq_nr) {
+			s->force_keyframe = TRUE;
+			s->last_fir_seq_nr = seq_nr;
+		}
 	}
 	return 0;
 }
@@ -706,6 +787,7 @@ static int enc_notify_sli(MSFilter *f, void *data) {
 
 	diff=(64 + (int)(most_recent & 0x3F) - (int)(sli->picture_id & 0x3F)) % 64;
 	s->last_sli_id=most_recent-diff;
+	
 	fs=enc_get_most_recent_reference_frame(s,FALSE);
 	ms_message("VP8: receiving SLI with pic id [%i], last-ref=[%i], most recent pic id=[%i]",s->last_sli_id, fs ? (int)fs->picture_id : 0, most_recent);
 	if (s->frames_state.golden.picture_id == s->last_sli_id) {
@@ -720,7 +802,7 @@ static int enc_notify_sli(MSFilter *f, void *data) {
 		/* Last key frame has been lost. */
 		s->force_keyframe = TRUE;
 	} else {
-		if (!fs || PICID_NEWER_THAN(s->last_sli_id,fs->picture_id)) {
+		if (!fs || PICID_NEWER_THAN(s->last_sli_id,fs->picture_id) || (s->frame_count - s->last_sli_frame_count >= 1<<15)) {
 			s->invalid_frame_reported = TRUE;
 		} else {
 #ifdef AVPF_DEBUG
@@ -729,6 +811,7 @@ static int enc_notify_sli(MSFilter *f, void *data) {
 #endif
 		}
 	}
+	s->last_sli_frame_count = s->frame_count;
 	ms_filter_unlock(f);
 	return 0;
 }
@@ -801,7 +884,7 @@ static MSFilterMethod enc_methods[] = {
 #define MS_VP8_ENC_ENC_FMT     "VP8"
 #define MS_VP8_ENC_NINPUTS     1 /*MS_YUV420P is assumed on this input */
 #define MS_VP8_ENC_NOUTPUTS    1
-#define MS_VP8_ENC_FLAGS       0
+#define MS_VP8_ENC_FLAGS       MS_FILTER_IS_PUMP
 
 #ifdef _MSC_VER
 
@@ -891,7 +974,7 @@ static void dec_init(MSFilter *f) {
 static int dec_initialize_impl(MSFilter *f){
 	DecState *s = (DecState *)f->data;
 	vpx_codec_dec_cfg_t cfg;
-		
+
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.threads = ms_factory_get_cpu_count(f->factory);
 	if (vpx_codec_dec_init(&s->codec, s->iface, &cfg, s->flags)){
@@ -907,7 +990,7 @@ static void dec_preprocess(MSFilter* f) {
 
 	/* Initialize codec */
 	if (!s->ready){
-		
+
 		s->flags = 0;
 #if 0
 		/* Deactivate fragments input for the vpx decoder because it has been broken in libvpx 1.4.
@@ -947,12 +1030,12 @@ static void dec_process(MSFilter *f) {
 	MSQueue frame;
 	MSQueue mtofree_queue;
 	Vp8RtpFmtFrameInfo frame_info;
-	
+
 	if (!s->ready){
 		ms_queue_flush(f->inputs[0]);
 		return;
 	}
-	
+
 	ms_filter_lock(f);
 
 	ms_queue_init(&frame);
@@ -1019,7 +1102,7 @@ static void dec_process(MSFilter *f) {
 			freemsg(im);
 		}
 	}
-	
+
 	ms_filter_unlock(f);
 }
 

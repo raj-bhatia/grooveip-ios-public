@@ -7,6 +7,7 @@
 //
 
 #import "ProviderDelegate.h"
+#import "LinphoneAppDelegate.h"
 #import "LinphoneManager.h"
 #import "PhoneMainView.h"
 #include "linphone/linphonecore.h"
@@ -54,15 +55,28 @@
 }
 
 - (void)configAudioSession:(AVAudioSession *)audioSession {
+	NSError *err = nil;
 	[audioSession setCategory:AVAudioSessionCategoryPlayAndRecord
 				  withOptions:AVAudioSessionCategoryOptionAllowBluetooth
-						error:nil];
-	[audioSession setMode:AVAudioSessionModeVoiceChat error:nil];
+						error:&err];
+	if (err) {
+		LOGE(@"Unable to change audio category because : %@", err.localizedDescription);
+		err = nil;
+	}
+	[audioSession setMode:AVAudioSessionModeVoiceChat error:&err];
+	if (err) {
+		LOGE(@"Unable to change audio mode because : %@", err.localizedDescription);
+		err = nil;
+	}
 	double sampleRate = 44100.0;
-	[audioSession setPreferredSampleRate:sampleRate error:nil];
+	[audioSession setPreferredSampleRate:sampleRate error:&err];
+	if (err) {
+		LOGE(@"Unable to change preferred sample rate because : %@", err.localizedDescription);
+		err = nil;
+	}
 }
 
-- (void)reportIncomingCallwithUUID:(NSUUID *)uuid handle:(NSString *)handle video:(BOOL)video {
+- (void)reportIncomingCall:(LinphoneCall *) call withUUID:(NSUUID *)uuid handle:(NSString *)handle video:(BOOL)video; {
 	// Create update to describe the incoming call and caller
 	CXCallUpdate *update = [[CXCallUpdate alloc] init];
 	update.remoteHandle = [[CXHandle alloc] initWithType:CXHandleTypeGeneric value:handle];
@@ -70,35 +84,52 @@
 	update.supportsHolding = TRUE;
 	update.supportsGrouping = TRUE;
 	update.supportsUngrouping = TRUE;
-	update.hasVideo = video;
+	update.hasVideo = _pendingCallVideo = video;
 
+	linphone_call_ref(call);
 	// Report incoming call to system
 	LOGD(@"CallKit: report new incoming call");
+	
 	[self.provider reportNewIncomingCallWithUUID:uuid
 										  update:update
 									  completion:^(NSError *error) {
+										  if (error) {
+											  LOGE(@"CallKit: cannot complete incoming call from [%@] caused by [%@]", handle, [error localizedDescription]);
+											  if ([error code] == CXErrorCodeIncomingCallErrorFilteredByDoNotDisturb ||
+												  [error code] == CXErrorCodeIncomingCallErrorFilteredByBlockList)
+												  linphone_call_decline(call,LinphoneReasonBusy); /*to give a chance for other devices to answer*/
+											  else
+												  linphone_call_decline(call,LinphoneReasonUnknown);
+										  }
+										  linphone_call_unref(call);
 									  }];
+}
+
+- (void)setPendingCall:(LinphoneCall *)pendingCall {
+	if (pendingCall) {
+		_pendingCall = pendingCall;
+		if (_pendingCall)
+			linphone_call_ref(_pendingCall);
+	} else if (_pendingCall) {
+		linphone_call_unref(_pendingCall);
+		_pendingCall = NULL;
+	}
 }
 
 #pragma mark - CXProdiverDelegate Protocol
 
 - (void)provider:(CXProvider *)provider performAnswerCallAction:(CXAnswerCallAction *)action {
 	LOGD(@"CallKit : Answering Call");
-	self.callKitCalls++;
 	[self configAudioSession:[AVAudioSession sharedInstance]];
 	[action fulfill];
 	NSUUID *uuid = action.callUUID;
-
 	NSString *callID = [self.calls objectForKey:uuid]; // first, make sure this callid is not already involved in a call
 	LinphoneCall *call = [LinphoneManager.instance callByCallId:callID];
-	if (call != NULL) {
-		BOOL video = ([UIApplication sharedApplication].applicationState == UIApplicationStateActive &&
-					  linphone_core_get_video_policy(LC)->automatically_accept &&
-					  linphone_call_params_video_enabled(linphone_call_get_remote_params((LinphoneCall *)call)));
-		self.pendingCall = call;
-		self.pendingCallVideo = video;
+	if (!call)
 		return;
-	};
+
+	self.callKitCalls++;
+	_pendingCall = call;
 }
 
 - (void)provider:(CXProvider *)provider performStartCallAction:(CXStartCallAction *)action {
@@ -116,7 +147,7 @@
 		call = [LinphoneManager.instance callByCallId:callID];
 	}
 	if (call != NULL) {
-		_pendingCall = call;
+		self.pendingCall = call;
 	}
 }
 
@@ -175,14 +206,16 @@
 	LinphoneCall *call = [LinphoneManager.instance callByCallId:callID];
 	if (call) {
 		if (action.isOnHold) {
+			LinphoneManager.instance.speakerBeforePause = LinphoneManager.instance.speakerEnabled;
 			linphone_call_pause((LinphoneCall *)call);
 		} else {
-			[self configAudioSession:[AVAudioSession sharedInstance]];
+			
 			if (linphone_core_get_conference(LC)) {
 				linphone_core_enter_conference(LC);
 				[NSNotificationCenter.defaultCenter postNotificationName:kLinphoneCallUpdate object:self];
 			} else {
-				_pendingCall = call;
+				[self configAudioSession:[AVAudioSession sharedInstance]]; 
+				self.pendingCall = call;
 			}
 		}
 	}
@@ -201,14 +234,14 @@
 - (void)provider:(CXProvider *)provider didActivateAudioSession:(AVAudioSession *)audioSession {
 	LOGD(@"CallKit : Audio session activated");
 	// Now we can (re)start the call
-	if (_pendingCall) {
-		LinphoneCallState state = linphone_call_get_state(_pendingCall);
+	if (self.pendingCall) {
+		LinphoneCallState state = linphone_call_get_state(self.pendingCall);
 		switch (state) {
 			case LinphoneCallIncomingReceived:
-				[LinphoneManager.instance acceptCall:(LinphoneCall *)_pendingCall evenWithVideo:_pendingCallVideo];
+				[LinphoneManager.instance acceptCall:(LinphoneCall *)self.pendingCall evenWithVideo:_pendingCallVideo];
 				break;
 			case LinphoneCallPaused:
-				linphone_call_resume((LinphoneCall *)_pendingCall);
+				linphone_call_resume((LinphoneCall *)self.pendingCall);
 				break;
 			case LinphoneCallStreamsRunning:
 				// May happen when multiple calls
@@ -224,7 +257,9 @@
 		}
 	}
 
-	_pendingCall = NULL;
+	self.pendingCall = NULL;
+	if (_pendingAddr)
+		linphone_address_unref(_pendingAddr);
 	_pendingAddr = NULL;
 	_pendingCallVideo = FALSE;
 }
@@ -232,7 +267,9 @@
 - (void)provider:(CXProvider *)provider didDeactivateAudioSession:(nonnull AVAudioSession *)audioSession {
 	LOGD(@"CallKit : Audio session deactivated");
 
-	_pendingCall = NULL;
+	self.pendingCall = NULL;
+	if (_pendingAddr)
+		linphone_address_unref(_pendingAddr);
 	_pendingAddr = NULL;
 	_pendingCallVideo = FALSE;
 }
@@ -248,7 +285,14 @@
 #pragma mark - CXCallObserverDelegate Protocol
 
 - (void)callObserver:(CXCallObserver *)callObserver callChanged:(CXCall *)call {
-	LOGD(@"CallKit : Call changed");
+	LOGD(@"CallKit : Call changed: Outgoing %d, Connected %d, Ended %d, Timer %@", [call isOutgoing], [call hasConnected], [call hasEnded], LinphoneAppDelegate.outgoingTimer);
+	if ((1 == [call isOutgoing]) && (0 == [call hasConnected]) && (0 == [call hasEnded])) {
+		if (nil != LinphoneAppDelegate.outgoingTimer) {
+			LOGD(@"CallKit: Stop outgoing call timer");
+			[LinphoneAppDelegate.outgoingTimer invalidate];
+			LinphoneAppDelegate.outgoingTimer = nil;
+		}
+	}
 }
 
 @end

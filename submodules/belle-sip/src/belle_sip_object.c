@@ -1,6 +1,6 @@
 /*
 	belle-sip - SIP (RFC3261) library.
-	Copyright (C) 2010  Belledonne Communications SARL
+	Copyright (C) 2010-2018  Belledonne Communications SARL
 
 	This program is free software: you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -94,12 +94,14 @@ void belle_sip_object_dump_active_objects(void){
 belle_sip_object_t * _belle_sip_object_new(size_t objsize, belle_sip_object_vptr_t *vptr){
 	belle_sip_object_t *obj=(belle_sip_object_t *)belle_sip_malloc0(vptr->size);
 
-	obj->ref=vptr->initially_unowned ? 0 : 1;
-	obj->vptr=vptr;
-	if (obj->ref==0){
+	obj->vptr = vptr;
+
+	obj->ref = vptr->initially_unowned ? 0 : 1;
+	if (obj->ref == 0) {
 		belle_sip_object_pool_t *pool=belle_sip_object_pool_get_current();
 		if (pool) belle_sip_object_pool_add(pool,obj);
 	}
+
 	add_new_object(obj);
 	return obj;
 }
@@ -110,10 +112,14 @@ int belle_sip_object_is_initially_unowned(const belle_sip_object_t *obj){
 
 belle_sip_object_t * belle_sip_object_ref(void *obj){
 	belle_sip_object_t *o=BELLE_SIP_OBJECT(obj);
-	if (o->ref==0 && o->pool){
+	if (o->ref == 0 && o->pool) {
 		belle_sip_object_pool_remove(o->pool,obj);
 	}
+
+	if (o->vptr->on_first_ref && (o->ref == 0 || (!o->vptr->initially_unowned && o->ref == 1)))
+		o->vptr->on_first_ref(o);
 	o->ref++;
+
 	return obj;
 }
 
@@ -126,6 +132,7 @@ void belle_sip_object_unref(void *ptr){
 		belle_sip_fatal("Fatal object error encountered, aborting.");
 		return;
 	}
+
 	if (obj->vptr->initially_unowned && obj->ref==0){
 		if (obj->pool)
 			belle_sip_object_pool_remove(obj->pool,obj);
@@ -133,7 +140,18 @@ void belle_sip_object_unref(void *ptr){
 		belle_sip_object_delete(obj);
 		return;
 	}
-	obj->ref--;
+
+
+
+	if (obj->vptr->on_last_ref){
+		if ((obj->vptr->initially_unowned && obj->ref==1)
+			|| (!obj->vptr->initially_unowned && obj->ref == 2)){
+			obj->vptr->on_last_ref(obj);
+		}
+	}
+
+	obj->ref--; /* keep the ref until here to make sure obj is not deleted by obj->vptr->on_last_ref*/
+
 	if (obj->ref == 0){
 		obj->ref = -1;
 		belle_sip_object_delete(obj);
@@ -508,7 +526,7 @@ static belle_sip_error_code checked_marshal(belle_sip_object_vptr_t *vptr, belle
 	}else{
 		belle_sip_error("Object of type %s produced an error during marshalling: %i",
 			vptr->type_name,error);
-	} 
+	}
 	belle_sip_free(p);
 	return error;
 }
@@ -807,5 +825,3 @@ belle_sip_object_pool_t *belle_sip_object_pool_get_current(void){
 	}
 	return (belle_sip_object_pool_t*)(*pools)->data;
 }
-
-

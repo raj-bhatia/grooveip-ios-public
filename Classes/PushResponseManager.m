@@ -38,11 +38,13 @@ static PushResponseManager *pushResponseManager = nil;
 - (void)pushResponseManagerWithUserId: (NSString *) userId
 								token: (NSString *) token
 							   callId: (NSString *) callId
+								route: (NSString *) route
 						   completion: (void (^)(GenericResponse *genericResponse, int *status)) completionHandler;
 {
-	LOGD(@"PushResponseManager enter: userId %@ token %@ callId %@", userId, token, callId);
+	LOGD(@"PushResponseManager enter: userId %@ token %@ callId %@ route %@", userId, token, callId, route);
 	
-	NSDictionary *dictTx = @{@"CallId" : callId};
+	NSDictionary *dictTx = @{@"CallId" : callId,
+							 @"Route" : route};
 	NSError *error = nil;
 	NSData *json;
 	NSString *jsonString;

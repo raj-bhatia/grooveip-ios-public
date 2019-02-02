@@ -1,6 +1,6 @@
 ############################################################################
 # matroska2.cmake
-# Copyright (C) 2015  Belledonne Communications, Grenoble France
+# Copyright (C) 2015-2018  Belledonne Communications, Grenoble France
 #
 ############################################################################
 #
@@ -23,6 +23,8 @@
 lcb_git_repository("git://git.linphone.org/libmatroska-c.git")
 lcb_git_tag_latest("bc")
 lcb_git_tag("c3fc2746f18bafefe3010669d8d2855240565c86")
-lcb_external_source_paths("externals/libmatroska-c")
+lcb_external_source_paths("bcmatroska2")
+lcb_package_source(YES)
+lcb_spec_file("matroska2.spec")
 
 lcb_linking_type("-DENABLE_STATIC=YES" "-DENABLE_SHARED=NO")

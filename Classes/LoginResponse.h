@@ -28,6 +28,7 @@
 @property NSString *sipName;
 @property NSString *sipPassword;
 @property NSString *sipServer;
+@property int currency;
 
 @end
 

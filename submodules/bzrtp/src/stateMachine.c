@@ -530,13 +530,17 @@ int state_keyAgreement_sendingCommit(bzrtpEvent_t event) {
 				}
 			}
 
+			/* if we have an aux secret check it match peer's one */
 			if (zrtpContext->cachedSecret.auxsecret!=NULL) {
-				if (memcmp(zrtpChannelContext->responderAuxsecretID, dhPart1Message->auxsecretID,8) != 0) {
+				if (memcmp(zrtpChannelContext->responderAuxsecretID, dhPart1Message->auxsecretID,8) != 0) { // they do not match, delete the aux secret as we must not use it
 					free(zrtpContext->cachedSecret.auxsecret);
 					zrtpContext->cachedSecret.auxsecret= NULL;
 					zrtpContext->cachedSecret.auxsecretLength = 0;
+				} else { // they do match, set the flag to 0 (its default is 1)
+					zrtpChannelContext->srtpSecrets.auxSecretMismatch=0;
 				}
 			}
+
 			if (zrtpContext->cachedSecret.pbxsecret!=NULL) {
 				if (memcmp(zrtpContext->responderCachedSecretHash.pbxsecretID, dhPart1Message->pbxsecretID,8) != 0) {
 					free(zrtpContext->cachedSecret.pbxsecret);
@@ -548,7 +552,7 @@ int state_keyAgreement_sendingCommit(bzrtpEvent_t event) {
 			/* in case of cache mismatch, be sure the Previously Verified Sas flag is reset in cache and in the context */
 			if (zrtpContext->cacheMismatchFlag == 1) {
 				uint8_t pvsFlag = 0;
-				char *colNames[] = {"pvs"};
+				const char *colNames[] = {"pvs"};
 				uint8_t *colValues[] = {&pvsFlag};
 				size_t colLength[] = {1};
 
@@ -569,9 +573,18 @@ int state_keyAgreement_sendingCommit(bzrtpEvent_t event) {
 			zrtpChannelContext->peerPackets[DHPART_MESSAGE_STORE_ID] = zrtpPacket;
 
 			/* Compute the shared DH secret */
-			zrtpContext->DHMContext->peer = (uint8_t *)malloc(zrtpChannelContext->keyAgreementLength*sizeof(uint8_t));
-			memcpy (zrtpContext->DHMContext->peer, dhPart1Message->pv, zrtpChannelContext->keyAgreementLength);
-			bctbx_DHMComputeSecret(zrtpContext->DHMContext, (int (*)(void *, uint8_t *, size_t))bctbx_rng_get, (void *)zrtpContext->RNGContext);
+			if (zrtpContext->keyAgreementAlgo == ZRTP_KEYAGREEMENT_DH2k || zrtpContext->keyAgreementAlgo == ZRTP_KEYAGREEMENT_DH3k) {
+				bctbx_DHMContext_t *DHMContext = (bctbx_DHMContext_t *)(zrtpContext->keyAgreementContext);
+				DHMContext->peer = (uint8_t *)malloc(zrtpChannelContext->keyAgreementLength*sizeof(uint8_t));
+				memcpy (DHMContext->peer, dhPart1Message->pv, zrtpChannelContext->keyAgreementLength);
+				bctbx_DHMComputeSecret(DHMContext, (int (*)(void *, uint8_t *, size_t))bctbx_rng_get, (void *)zrtpContext->RNGContext);
+			}
+			if (zrtpContext->keyAgreementAlgo == ZRTP_KEYAGREEMENT_X255 || zrtpContext->keyAgreementAlgo == ZRTP_KEYAGREEMENT_X448) {
+				bctbx_ECDHContext_t *ECDHContext = (bctbx_ECDHContext_t *)(zrtpContext->keyAgreementContext);
+				ECDHContext->peerPublic = (uint8_t *)malloc(zrtpChannelContext->keyAgreementLength*sizeof(uint8_t));
+				memcpy (ECDHContext->peerPublic, dhPart1Message->pv, zrtpChannelContext->keyAgreementLength);
+				bctbx_ECDHComputeSecret(ECDHContext, (int (*)(void *, uint8_t *, size_t))bctbx_rng_get, (void *)zrtpContext->RNGContext);
+			}
 
 			/* Derive the s0 key */
 			bzrtp_computeS0DHMMode(zrtpContext, zrtpChannelContext);
@@ -821,29 +834,29 @@ int state_keyAgreement_responderSendingDHPart1(bzrtpEvent_t event) {
 				}
 			}
 
+			/* if we have an auxiliary secret, check it match peer's one */
 			if (zrtpContext->cachedSecret.auxsecret!=NULL) {
-				if (memcmp(zrtpChannelContext->initiatorAuxsecretID, dhPart2Message->auxsecretID,8) != 0) {
+				if (memcmp(zrtpChannelContext->initiatorAuxsecretID, dhPart2Message->auxsecretID,8) != 0) {  // they do not match, delete the aux secret as we must not use it
 					free(zrtpContext->cachedSecret.auxsecret);
 					zrtpContext->cachedSecret.auxsecret= NULL;
 					zrtpContext->cachedSecret.auxsecretLength = 0;
-					/*bzrtp_freeZrtpPacket(zrtpPacket);
-					return BZRTP_ERROR_CACHEMISMATCH;*/
+				} else { // they do match, set the flag to 0 (its default is 1)
+					zrtpChannelContext->srtpSecrets.auxSecretMismatch=0;
 				}
 			}
+
 			if (zrtpContext->cachedSecret.pbxsecret!=NULL) {
 				if (memcmp(zrtpContext->initiatorCachedSecretHash.pbxsecretID, dhPart2Message->pbxsecretID,8) != 0) {
 					free(zrtpContext->cachedSecret.pbxsecret);
 					zrtpContext->cachedSecret.pbxsecret= NULL;
 					zrtpContext->cachedSecret.pbxsecretLength = 0;
-					/*bzrtp_freeZrtpPacket(zrtpPacket);
-					return BZRTP_ERROR_CACHEMISMATCH;*/
 				}
 			}
 
 			/* in case of cache mismatch, be sure the Previously Verified Sas flag is reset in cache and in the context */
 			if (zrtpContext->cacheMismatchFlag == 1) {
 				uint8_t pvsFlag = 0;
-				char *colNames[] = {"pvs"};
+				const char *colNames[] = {"pvs"};
 				uint8_t *colValues[] = {&pvsFlag};
 				size_t colLength[] = {1};
 
@@ -867,9 +880,18 @@ int state_keyAgreement_responderSendingDHPart1(bzrtpEvent_t event) {
 			zrtpChannelContext->peerPackets[DHPART_MESSAGE_STORE_ID] = zrtpPacket;
 
 			/* Compute the shared DH secret */
-			zrtpContext->DHMContext->peer = (uint8_t *)malloc(zrtpChannelContext->keyAgreementLength*sizeof(uint8_t));
-			memcpy (zrtpContext->DHMContext->peer, dhPart2Message->pv, zrtpChannelContext->keyAgreementLength);
-			bctbx_DHMComputeSecret(zrtpContext->DHMContext, (int (*)(void *, uint8_t *, size_t))bctbx_rng_get, (void *)zrtpContext->RNGContext);
+			if (zrtpContext->keyAgreementAlgo == ZRTP_KEYAGREEMENT_DH2k || zrtpContext->keyAgreementAlgo == ZRTP_KEYAGREEMENT_DH3k) {
+				bctbx_DHMContext_t *DHMContext = (bctbx_DHMContext_t *)(zrtpContext->keyAgreementContext);
+				DHMContext->peer = (uint8_t *)malloc(zrtpChannelContext->keyAgreementLength*sizeof(uint8_t));
+				memcpy (DHMContext->peer, dhPart2Message->pv, zrtpChannelContext->keyAgreementLength);
+				bctbx_DHMComputeSecret(DHMContext, (int (*)(void *, uint8_t *, size_t))bctbx_rng_get, (void *)zrtpContext->RNGContext);
+			}
+			if (zrtpContext->keyAgreementAlgo == ZRTP_KEYAGREEMENT_X255 || zrtpContext->keyAgreementAlgo == ZRTP_KEYAGREEMENT_X448) {
+				bctbx_ECDHContext_t *ECDHContext = (bctbx_ECDHContext_t *)(zrtpContext->keyAgreementContext);
+				ECDHContext->peerPublic = (uint8_t *)malloc(zrtpChannelContext->keyAgreementLength*sizeof(uint8_t));
+				memcpy (ECDHContext->peerPublic, dhPart2Message->pv, zrtpChannelContext->keyAgreementLength);
+				bctbx_ECDHComputeSecret(ECDHContext, (int (*)(void *, uint8_t *, size_t))bctbx_rng_get, (void *)zrtpContext->RNGContext);
+			}
 
 			/* Derive the s0 key */
 			bzrtp_computeS0DHMMode(zrtpContext, zrtpChannelContext);
@@ -1726,6 +1748,13 @@ int bzrtp_responseToHelloMessage(bzrtpContext_t *zrtpContext, bzrtpChannelContex
 			bctbx_rng_get(zrtpContext->RNGContext, zrtpContext->responderCachedSecretHash.pbxsecretID, 8);
 		}
 
+		/* if we have any transient auxiliary secret, append it to the one found in cache */
+		if (zrtpContext->transientAuxSecret!=NULL) {
+			zrtpContext->cachedSecret.auxsecret = (uint8_t *)realloc(zrtpContext->cachedSecret.auxsecret, zrtpContext->cachedSecret.auxsecretLength + zrtpContext->transientAuxSecretLength);
+			memcpy(zrtpContext->cachedSecret.auxsecret + zrtpContext->cachedSecret.auxsecretLength, zrtpContext->transientAuxSecret, zrtpContext->transientAuxSecretLength);
+			zrtpContext->cachedSecret.auxsecretLength += zrtpContext->transientAuxSecretLength;
+		}
+
 		if (zrtpContext->cachedSecret.auxsecret!=NULL) {
 			zrtpChannelContext->hmacFunction(zrtpContext->cachedSecret.auxsecret, zrtpContext->cachedSecret.auxsecretLength, zrtpChannelContext->selfH[3], 32, 8, zrtpChannelContext->initiatorAuxsecretID);
 			zrtpChannelContext->hmacFunction(zrtpContext->cachedSecret.auxsecret, zrtpContext->cachedSecret.auxsecretLength, zrtpChannelContext->peerH[3], 32, 8, zrtpChannelContext->responderAuxsecretID);
@@ -1892,7 +1921,15 @@ int bzrtp_computeS0DHMMode(bzrtpContext_t *zrtpContext, bzrtpChannelContext_t *z
 	dataToHash[3] = 0x01;
 	hashDataIndex = 4;
 	
-	memcpy(dataToHash+hashDataIndex, zrtpContext->DHMContext->key, zrtpChannelContext->keyAgreementLength);
+	if (zrtpContext->keyAgreementAlgo == ZRTP_KEYAGREEMENT_DH2k || zrtpContext->keyAgreementAlgo == ZRTP_KEYAGREEMENT_DH3k) {
+		bctbx_DHMContext_t *DHMContext = (bctbx_DHMContext_t *)zrtpContext->keyAgreementContext;
+		memcpy(dataToHash+hashDataIndex, DHMContext->key, zrtpChannelContext->keyAgreementLength);
+	}
+	if (zrtpContext->keyAgreementAlgo == ZRTP_KEYAGREEMENT_X255 || zrtpContext->keyAgreementAlgo == ZRTP_KEYAGREEMENT_X448) {
+		bctbx_ECDHContext_t *ECDHContext = (bctbx_ECDHContext_t *)zrtpContext->keyAgreementContext;
+		memcpy(dataToHash+hashDataIndex, ECDHContext->sharedSecret, zrtpChannelContext->keyAgreementLength);
+	}
+
 	hashDataIndex += zrtpChannelContext->keyAgreementLength;
 	memcpy(dataToHash+hashDataIndex, "ZRTP-HMAC-KDF", 13);
 	hashDataIndex += 13;
@@ -1949,8 +1986,14 @@ int bzrtp_computeS0DHMMode(bzrtpContext_t *zrtpContext, bzrtpChannelContext_t *z
 		zrtpContext->ZRTPSess);
 
 	/* clean the DHM context (secret and key shall be erased by this operation) */
-	bctbx_DestroyDHMContext(zrtpContext->DHMContext);
-	zrtpContext->DHMContext = NULL;
+	if (zrtpContext->keyAgreementAlgo == ZRTP_KEYAGREEMENT_DH2k || zrtpContext->keyAgreementAlgo == ZRTP_KEYAGREEMENT_DH3k) {
+		bctbx_DestroyDHMContext((bctbx_DHMContext_t *)(zrtpContext->keyAgreementContext));
+	}
+	if (zrtpContext->keyAgreementAlgo == ZRTP_KEYAGREEMENT_X255 || zrtpContext->keyAgreementAlgo == ZRTP_KEYAGREEMENT_X448) {
+		bctbx_DestroyECDHContext((bctbx_ECDHContext_t *)(zrtpContext->keyAgreementContext));
+	}
+	zrtpContext->keyAgreementContext = NULL;
+	zrtpContext->keyAgreementAlgo = ZRTP_UNSET_ALGO;
 
 	/* now derive the other keys */
 	return bzrtp_deriveKeysFromS0(zrtpContext, zrtpChannelContext);
@@ -2172,7 +2215,7 @@ int bzrtp_deriveSrtpKeysFromS0(bzrtpContext_t *zrtpContext, bzrtpChannelContext_
  * return 0 on success, error code otherwise
  */
 int bzrtp_updateCachedSecrets(bzrtpContext_t *zrtpContext, bzrtpChannelContext_t *zrtpChannelContext) {
-	char *colNames[] = {"rs1", "rs2"};
+	const char *colNames[] = {"rs1", "rs2"};
 	uint8_t *colValues[2] = {NULL, NULL};
 	size_t colLength[2] = {RETAINED_SECRET_LENGTH,0};
 	

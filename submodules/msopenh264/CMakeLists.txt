@@ -21,7 +21,7 @@
 ############################################################################
 
 cmake_minimum_required(VERSION 3.0)
-project(msopenh264 VERSION 1.2.0 LANGUAGES CXX)
+project(msopenh264 VERSION 1.2.1 LANGUAGES CXX)
 
 
 set(PACKAGE "${PROJECT_NAME}")
@@ -52,10 +52,12 @@ check_include_file_cxx("stdbool.h" HAVE_STDBOOL_H)
 
 if(LINPHONE_BUILDER_GROUP_EXTERNAL_SOURCE_PATH_BUILDERS)
 	include("${EP_ortp_CONFIG_DIR}/OrtpConfig.cmake")
+	include("${EP_bctoolbox_CONFIG_DIR}/BcToolboxConfig.cmake")
 	include("${EP_ms2_CONFIG_DIR}/Mediastreamer2Config.cmake")
 else()
 	find_package(Mediastreamer2 REQUIRED)
 	find_package(ORTP REQUIRED)
+	find_package(BcToolbox REQUIRED)
 endif()
 find_package(OpenH264 REQUIRED)
 
@@ -74,7 +76,7 @@ include_directories(
 add_definitions(-DHAVE_CONFIG_H)
 if(NOT MSVC)
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wno-error=unknown-pragmas")
-	if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+	if(CMAKE_C_COMPILER_ID MATCHES "Clang")
 		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error=unknown-warning-option")
 		if(NOT IOS)
 			set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror -Wextra")

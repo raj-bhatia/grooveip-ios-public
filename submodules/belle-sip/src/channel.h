@@ -1,20 +1,21 @@
 /*
 	belle-sip - SIP (RFC3261) library.
-    Copyright (C) 2010  Belledonne Communications SARL
+	Copyright (C) 2010-2018  Belledonne Communications SARL
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 2 of the License, or
+	(at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 #ifndef BELLE_SIP_CHANNEL_H
 #define BELLE_SIP_CHANNEL_H
 
@@ -112,6 +113,7 @@ struct belle_sip_channel{
 	belle_sip_channel_input_stream_t input_stream;
 	belle_sip_list_t* incoming_messages;
 	belle_sip_source_t *inactivity_timer;
+	belle_sip_source_t *dns_ttl_timer;
 	uint64_t last_recv_time;
 	int simulated_recv_return; /* used to simulate network error. 0= no data (disconnected) >0= do nothing -1= network error, 1500 special number to silently discard incoming buffer*/
 	unsigned long bg_task_id;
@@ -124,6 +126,7 @@ struct belle_sip_channel{
 	unsigned char soft_error; /*set when this channel enters ERROR state because of error detected in upper layer */
 	int stop_logging_buffer; /*log buffer content only if this is non binary data, and stop it at the first occurence*/
 	bool_t closed_by_remote; /*If the channel has been remotely closed*/
+	bool_t dns_ttl_timedout;
 };
 
 #define BELLE_SIP_CHANNEL(obj)		BELLE_SIP_CAST(obj,belle_sip_channel_t)
@@ -188,7 +191,7 @@ void channel_set_state(belle_sip_channel_t *obj, belle_sip_channel_state_t state
 /*
  * Process incoming data and synchronously invoke the listeners if
  * complete message are received. The invocation of the listeners may
- * result in the channel being destroyed (ex: calling belle_sip_listening_point_clean_channels() within 
+ * result in the channel being destroyed (ex: calling belle_sip_listening_point_clean_channels() within
  * a transaction completed notification).
  * WARNING: As a result, the caller of this function must be take into account that the channel no longer exists
  * in return from this function.
@@ -206,6 +209,11 @@ int belle_sip_channel_notify_timeout(belle_sip_channel_t *obj);
 
 /*Used by transaction layer to report a server having internal errors, so that we can retry with another IP (in case of DNS SRV)*/
 BELLESIP_EXPORT void belle_sip_channel_notify_server_error(belle_sip_channel_t *obj);
+
+/*
+ * Check if the DNS TTL has expired. If this is the case, set the channel status to RES_IN_PROGRESS.
+ */
+void belle_sip_channel_check_dns_reusability(belle_sip_channel_t *obj);
 
 BELLE_SIP_END_DECLS
 
@@ -239,6 +247,10 @@ struct belle_tls_crypto_config{
 						   BELLE_TLS_VERIFY_CN_MISMATCH ignore Common Name mismatch exception
 						   BELLE_TLS_VERIFY_ANY_REASON(ignore any exception */
 	void *ssl_config; /**< externally provided ssl configuration context, will be casted and given to the underlying crypto library, use only if you really know what you're doing */
+	belle_tls_crypto_config_verify_callback_t verify_cb;
+	void *verify_cb_data;
+	belle_tls_crypto_config_postcheck_callback_t postcheck_cb;
+	void *postcheck_cb_data;
 };
 
 #endif

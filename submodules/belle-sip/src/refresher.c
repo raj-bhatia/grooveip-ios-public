@@ -1,19 +1,19 @@
 /*
 	belle-sip - SIP (RFC3261) library.
-    Copyright (C) 2012  Belledonne Communications SARL
+	Copyright (C) 2010-2018  Belledonne Communications SARL
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 2 of the License, or
-    (at your option) any later version.
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 2 of the License, or
+	(at your option) any later version.
 
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include <bctoolbox/defs.h>
@@ -55,7 +55,7 @@ struct belle_sip_refresher {
 	int number_of_retry; /*counter to count number of unsuccesfull retry, used to know when to retry*/
 	timer_purpose_t timer_purpose;
 	unsigned char manual;
-	unsigned int publish_pending;
+    unsigned int publish_pending;
 };
 static void set_or_update_dialog(belle_sip_refresher_t* refresher, belle_sip_dialog_t* dialog);
 static int set_expires_from_trans(belle_sip_refresher_t* refresher);
@@ -220,6 +220,7 @@ static void process_response_event(belle_sip_listener_t *user_ctx, const belle_s
 		return; /*not for me*/
 
 	set_or_update_dialog(refresher,belle_sip_response_event_get_dialog(event));
+	contact=belle_sip_message_get_header_by_type(response,belle_sip_header_contact_t);
 	/*success case:*/
 	if (response_code>=200 && response_code<300){
 		refresher->auth_failures=0;
@@ -260,7 +261,8 @@ static void process_response_event(belle_sip_listener_t *user_ctx, const belle_s
 		if (refresher->state==started) {
 			if (!refresher->first_acknoleged_request)
 				belle_sip_object_ref(refresher->first_acknoleged_request = request);
-			if (is_contact_address_acurate(refresher,request) || !belle_sip_provider_nat_helper_enabled(client_transaction->base.provider)) {
+			if (is_contact_address_acurate(refresher,request)
+				|| (!belle_sip_provider_nat_helper_enabled(client_transaction->base.provider) || (contact && belle_sip_parameters_has_parameter(BELLE_SIP_PARAMETERS(contact), "pub-gruu"))) ) { /*Disable nat helper in gruu case. Might not be the best fix, maybe better to make reflesh is not mandatory*/
 				schedule_timer(refresher); /*re-arm timer*/
 			} else {
 				belle_sip_message("belle_sip_refresher_start(): refresher [%p] is resubmitting request because contact sent was not correct in original request.",refresher);
@@ -273,7 +275,7 @@ static void process_response_event(belle_sip_listener_t *user_ctx, const belle_s
 		switch (response_code) {
 		case 301:
 		case 302:
-			contact=belle_sip_message_get_header_by_type(response,belle_sip_header_contact_t);
+
 			if (contact){
 				belle_sip_uri_t *uri=belle_sip_header_address_get_uri(BELLE_SIP_HEADER_ADDRESS(contact));
 				if (uri && belle_sip_refresher_refresh_internal(refresher,refresher->target_expires,TRUE,&refresher->auth_events,uri)==0)
@@ -520,7 +522,6 @@ static int belle_sip_refresher_refresh_internal(belle_sip_refresher_t* refresher
 						belle_sip_message_set_body(BELLE_SIP_MESSAGE(request), NULL, 0);
 						belle_sip_message_remove_header(BELLE_SIP_MESSAGE(request),BELLE_SIP_CONTENT_TYPE);
 						belle_sip_message_remove_header(BELLE_SIP_MESSAGE(request),BELLE_SIP_CONTENT_LENGTH);
-
 					}
 				}
 				belle_sip_provider_add_authorization(prov,request,old_response,NULL,auth_infos,refresher->realm);
@@ -596,6 +597,9 @@ static int belle_sip_refresher_refresh_internal(belle_sip_refresher_t* refresher
 	belle_sip_object_unref(refresher->transaction);
 	refresher->transaction=client_transaction;
 	belle_sip_object_ref(refresher->transaction);
+
+	/*Dialog may have changed, specially if terminated (I.E timeout). In that case, it will only be autiore-created when response is received from peer, so in the mean time, we reset it*/
+	set_or_update_dialog(refresher, belle_sip_transaction_get_dialog(BELLE_SIP_TRANSACTION(client_transaction)));
 
 	if (belle_sip_client_transaction_send_request_to(client_transaction,requri?requri:preset_route)) { /*send imediatly to requri in case of redirect*/
 		belle_sip_error("Cannot send refresh method [%s] for refresher [%p]"
